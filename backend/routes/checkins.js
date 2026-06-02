@@ -112,47 +112,150 @@ router.post('/', (req, res) => {
   }
 });
 
-// POST /api/checkins/:id/checkout - Realizar check-out
+// POST /api/checkins/:id/checkout - Realizar check-out con factura automática
 router.post('/:id/checkout', (req, res) => {
   try {
     const db = getDB();
-    const { observaciones } = req.body;
+    const { observaciones, metodo_pago = 'EFECTIVO', generar_factura = true } = req.body;
 
     const checkin = db.prepare(`
-      SELECT c.*, r.tarifa_aplicada, r.moneda, r.monto_deposito
+      SELECT c.*, r.tarifa_aplicada, r.moneda, r.tasa_cambio, r.monto_deposito, r.notas,
+        r.fecha_entrada, r.fecha_salida
       FROM checkins c JOIN reservas r ON c.reserva_id = r.id
       WHERE c.id = ? AND c.estado = 'ACTIVO'
     `).get(req.params.id);
 
     if (!checkin) return res.status(404).json({ ok: false, error: 'Check-in activo no encontrado' });
 
+    const huesped = db.prepare('SELECT * FROM huespedes WHERE id = ?').get(checkin.huesped_id);
+    const extras = db.prepare('SELECT * FROM servicios_extras WHERE checkin_id = ?').all(req.params.id);
+
+    // Calcular noches reales
+    const fechaIn  = new Date(checkin.fecha_checkin);
+    const fechaOut = new Date();
+    const noches   = Math.max(1, Math.round((fechaOut - fechaIn) / 86400000));
+    const cargoHab = checkin.tarifa_aplicada * noches;
+    const totalExtras = extras.reduce((s, e) => s + e.subtotal, 0);
+
+    // Leer tasas de impuesto
+    const cfgIsv = db.prepare("SELECT valor FROM configuracion_hotel WHERE clave = 'isv_porcentaje'").get();
+    const cfgIht = db.prepare("SELECT valor FROM configuracion_hotel WHERE clave = 'iht_porcentaje'").get();
+    const TASA_ISV = (parseFloat(cfgIsv?.valor) || 15) / 100;
+    const TASA_IHT = (parseFloat(cfgIht?.valor) || 4)  / 100;
+
+    let facturaId = null;
+    let numeroFactura = null;
+
     const doCheckout = db.transaction(() => {
+      // 1. Cerrar checkin
       db.prepare(`
-        UPDATE checkins SET estado = 'CHECKOUT', fecha_checkout_real = datetime('now','localtime'),
+        UPDATE checkins SET estado = 'CHECKOUT', fecha_checkout_real = datetime(\'now\',\'localtime\'),
           observaciones = COALESCE(?, observaciones)
         WHERE id = ?
       `).run(observaciones, req.params.id);
 
-      db.prepare(`UPDATE reservas SET estado = 'CHECKOUT', updated_at = datetime('now','localtime') WHERE id = ?`)
+      db.prepare(`UPDATE reservas SET estado = 'CHECKOUT', updated_at = datetime(\'now\',\'localtime\') WHERE id = ?`)
         .run(checkin.reserva_id);
 
-      // Habitación pasa a SUCIA post-checkout
-      db.prepare(`UPDATE habitaciones SET estado = 'SUCIA', updated_at = datetime('now','localtime') WHERE id = ?`)
+      db.prepare(`UPDATE habitaciones SET estado = 'SUCIA', updated_at = datetime(\'now\',\'localtime\') WHERE id = ?`)
         .run(checkin.habitacion_id);
+
+      // 2. Generar factura automática si hay config SAR activa
+      if (generar_factura) {
+        const sarConfig = db.prepare('SELECT * FROM configuracion_sar WHERE activo = 1 ORDER BY id DESC LIMIT 1').get();
+        if (sarConfig) {
+          // Construir ítems de factura
+          const items = [];
+
+          // Cargo por habitación (IHT 4% turístico)
+          items.push({
+            descripcion: `Hospedaje ${noches} noche(s)`,
+            cantidad: noches,
+            precio_unitario: checkin.tarifa_aplicada,
+            tipo_impuesto: 'IHT',
+            subtotal: cargoHab,
+          });
+
+          // Servicios extras (ISV 15%)
+          extras.forEach(ex => {
+            items.push({
+              descripcion: ex.descripcion,
+              cantidad: ex.cantidad,
+              precio_unitario: ex.precio_unitario,
+              tipo_impuesto: 'ISV',
+              subtotal: ex.subtotal,
+            });
+          });
+
+          // Calcular totales
+          let subtotal_gravado_isv = 0, subtotal_gravado_iht = 0, subtotal_exento = 0;
+          items.forEach(it => {
+            if (it.tipo_impuesto === 'ISV') subtotal_gravado_isv += it.subtotal;
+            else if (it.tipo_impuesto === 'IHT') subtotal_gravado_iht += it.subtotal;
+            else subtotal_exento += it.subtotal;
+          });
+          const isv_15 = subtotal_gravado_isv * TASA_ISV;
+          const iht_4  = subtotal_gravado_iht * TASA_IHT;
+          const total  = subtotal_exento + subtotal_gravado_isv + subtotal_gravado_iht + isv_15 + iht_4;
+
+          // Número de factura SAR
+          const correlativo = sarConfig.correlativo_actual;
+          numeroFactura = `${sarConfig.establecimiento}-${sarConfig.punto_emision}-${sarConfig.tipo_documento}-${String(correlativo).padStart(8, '0')}`;
+          db.prepare('UPDATE configuracion_sar SET correlativo_actual = correlativo_actual + 1 WHERE id = ?').run(sarConfig.id);
+
+          // Insertar factura
+          const fRes = db.prepare(`
+            INSERT INTO facturas (
+              numero_factura, cai, checkin_id, reserva_id, huesped_id,
+              cliente_nombre, cliente_rtn, moneda, tasa_cambio,
+              subtotal_exento, subtotal_gravado_isv, subtotal_gravado_iht,
+              isv_15, iht_4, descuento, total,
+              estado, metodo_pago, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'EMITIDA', ?, 'SISTEMA')
+          `).run(
+            numeroFactura, sarConfig.cai,
+            parseInt(req.params.id), checkin.reserva_id, checkin.huesped_id,
+            huesped ? `${huesped.nombres} ${huesped.apellidos}` : 'Cliente',
+            huesped?.rtn || null,
+            checkin.moneda || 'HNL', checkin.tasa_cambio || 1,
+            subtotal_exento, subtotal_gravado_isv, subtotal_gravado_iht,
+            isv_15, iht_4, total, metodo_pago
+          );
+
+          facturaId = fRes.lastInsertRowid;
+
+          // Insertar detalles
+          const insertDet = db.prepare(`
+            INSERT INTO detalle_facturas (factura_id, descripcion, cantidad, precio_unitario, tipo_impuesto, subtotal)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `);
+          items.forEach(it => insertDet.run(facturaId, it.descripcion, it.cantidad, it.precio_unitario, it.tipo_impuesto, it.subtotal));
+        }
+      }
     });
 
     doCheckout();
 
     // Notificación WhatsApp
-    const huesped = db.prepare('SELECT * FROM huespedes WHERE id = ?').get(checkin.huesped_id);
     if (huesped?.telefono) {
+      const totalMsg = cargoHab + totalExtras;
       const msg = `🏨 *MetricRoom* - Check-Out Confirmado\n` +
         `Gracias ${huesped.nombres} por hospedarte con nosotros.\n` +
+        (numeroFactura ? `🧾 Factura: *${numeroFactura}*\n` : '') +
+        `💰 Total: *L. ${totalMsg.toFixed(2)}*\n` +
         `¡Esperamos verte pronto! 🙏`;
       sendWhatsApp(huesped.telefono, msg).catch(console.error);
     }
 
-    res.json({ ok: true, message: 'Check-out realizado. Habitación marcada para limpieza.' });
+    res.json({
+      ok: true,
+      message: 'Check-out realizado. Habitación marcada para limpieza.',
+      data: {
+        factura_id: facturaId,
+        numero_factura: numeroFactura,
+        factura_generada: !!facturaId,
+      }
+    });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

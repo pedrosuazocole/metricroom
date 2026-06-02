@@ -1,6 +1,6 @@
 // src/pages/CheckInsPage.jsx - Gestión de check-ins activos y check-outs
 import { useState, useEffect } from 'react'
-import { LogIn, LogOut, Plus, DollarSign, X, ChevronDown } from 'lucide-react'
+import { LogIn, LogOut, Plus, DollarSign, X, ChevronDown, FileText, Printer } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 
@@ -14,6 +14,7 @@ export default function CheckInsPage() {
   const [reservaId, setReservaId] = useState('')
   const [extraForm, setExtraForm] = useState({ descripcion:'', cantidad:1, precio_unitario:'', categoria:'OTROS' })
   const [loading, setLoading] = useState(true)
+  const [facturaCheckout, setFacturaCheckout] = useState(null)
 
   const cargar = async () => {
     setLoading(true)
@@ -50,10 +51,23 @@ export default function CheckInsPage() {
 
   const doCheckout = async (checkin) => {
     if (!confirm(`¿Confirmar check-out de ${checkin.huesped_nombre}?`)) return
-    await api.post(`/checkins/${checkin.id}/checkout`)
-    toast.success('Check-out completado. Habitación enviada a limpieza.')
-    setSelected(null)
-    cargar()
+    try {
+      const r = await api.post(`/checkins/${checkin.id}/checkout`, {
+        metodo_pago: 'EFECTIVO',
+        generar_factura: true,
+      })
+      if (r.data.data?.factura_generada) {
+        toast.success(`✅ Check-out completado. Factura ${r.data.data.numero_factura} generada.`)
+        setFacturaCheckout(r.data.data)
+      } else {
+        toast.success('Check-out completado. Habitación enviada a limpieza.')
+        toast('⚠️ Sin factura: configure el CAI en Configuración → SAR', { icon: '⚠️' })
+      }
+      setSelected(null)
+      cargar()
+    } catch(e) {
+      toast.error(e.response?.data?.error || 'Error al hacer check-out')
+    }
   }
 
   const agregarExtra = async (e) => {
@@ -225,5 +239,41 @@ export default function CheckInsPage() {
         </div>
       )}
     </div>
+      {/* Modal: Factura generada en checkout */}
+      {facturaCheckout && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-2xl p-6 max-w-sm w-full space-y-4 border border-green-500/30">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-green-400" />
+              </div>
+              <div>
+                <h3 className="text-white font-semibold">Factura Generada</h3>
+                <p className="text-slate-400 text-sm">Check-out completado exitosamente</p>
+              </div>
+            </div>
+            <div className="bg-slate-700/50 rounded-xl p-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Número de Factura</span>
+                <span className="text-white font-mono font-semibold">{facturaCheckout.numero_factura}</span>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => { window.open(`/api/facturas/${facturaCheckout.factura_id}`, '_blank'); setFacturaCheckout(null) }}
+                className="flex-1 btn-secondary flex items-center justify-center gap-2"
+              >
+                <Printer className="w-4 h-4" /> Ver Factura
+              </button>
+              <button
+                onClick={() => setFacturaCheckout(null)}
+                className="flex-1 btn-primary"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
   )
 }
