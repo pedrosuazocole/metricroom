@@ -1,0 +1,43 @@
+version: '3.9'
+
+# ============================================================
+# MetricRoom — Docker Compose para desarrollo local
+# Uso: docker compose up --build
+# ============================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_PATH: /data/metricroom.db
+      JWT_SECRET: dev_secret_local
+    volumes:
+      - metricroom_data:/data
+      - ./backend:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host"
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3001
+    depends_on:
+      - backend
+
+volumes:
+  metricroom_data:
+    driver: local
