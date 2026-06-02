@@ -1,6 +1,6 @@
 // src/pages/ConfiguracionPage.jsx - Configuración general del hotel
-import { useState, useEffect } from 'react'
-import { Settings, Save, Plus, X, DollarSign, MessageCircle, Building2, FileText } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Settings, Save, Plus, X, DollarSign, MessageCircle, Building2, FileText, Upload, Trash2, ImageIcon } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 
@@ -23,6 +23,8 @@ export default function ConfiguracionPage() {
   const [showTarifa, setShowTarifa] = useState(false)
   const [tarifaForm, setTarifaForm] = useState({ nombre: '', tipo: 'ESTANDAR', precio: '', descripcion: '' })
   const [loading, setLoading] = useState(true)
+  const [logoUploading, setLogoUploading] = useState(false)
+  const logoInputRef = useRef()
 
   const cargar = async () => {
     setLoading(true)
@@ -96,6 +98,35 @@ export default function ConfiguracionPage() {
     cargar()
   }
 
+
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    if (file.size > 500000) return toast.error('El logo no debe superar 500KB')
+    setLogoUploading(true)
+    try {
+      const reader = new FileReader()
+      reader.onload = async (ev) => {
+        const base64 = ev.target.result
+        await api.post('/configuracion/logo', { logo_base64: base64 })
+        toast.success('Logo subido correctamente')
+        setConfig(p => ({ ...p, hotel_logo: base64 }))
+        setLogoUploading(false)
+      }
+      reader.readAsDataURL(file)
+    } catch (err) {
+      toast.error('Error al subir el logo')
+      setLogoUploading(false)
+    }
+  }
+
+  const handleLogoDelete = async () => {
+    if (!confirm('¿Eliminar el logo del hotel?')) return
+    await api.delete('/configuracion/logo')
+    setConfig(p => ({ ...p, hotel_logo: '' }))
+    toast.success('Logo eliminado')
+  }
+
   const c = (key) => config[key] || ''
   const setC = (key, val) => setConfig(p => ({ ...p, [key]: val }))
 
@@ -158,6 +189,35 @@ export default function ConfiguracionPage() {
               <textarea value={c('factura_pie')} onChange={e => setC('factura_pie', e.target.value)} className="input-field" rows={2} placeholder="Texto que aparece al final de cada factura..." />
             </div>
           </div>
+            <div className="sm:col-span-2">
+              <label className="label">Logo del Hotel (aparece en facturas)</label>
+              <div className="flex items-start gap-4 p-4 bg-slate-900/50 border border-slate-700 rounded-xl">
+                {c('hotel_logo') ? (
+                  <div className="flex-shrink-0">
+                    <img src={c('hotel_logo')} alt="Logo" className="max-h-20 max-w-40 object-contain rounded border border-slate-600 bg-white p-1" />
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 rounded border-2 border-dashed border-slate-600 flex items-center justify-center flex-shrink-0 bg-slate-800">
+                    <ImageIcon className="w-8 h-8 text-slate-600" />
+                  </div>
+                )}
+                <div className="flex-1 space-y-2">
+                  <p className="text-xs text-slate-400">PNG, JPG o SVG · Máximo 500KB · Recomendado 300×100px</p>
+                  <div className="flex gap-2">
+                    <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                    <button type="button" onClick={() => logoInputRef.current.click()}
+                      className="btn-secondary text-xs flex items-center gap-1.5" disabled={logoUploading}>
+                      <Upload className="w-3.5 h-3.5" /> {logoUploading ? 'Subiendo...' : c('hotel_logo') ? 'Cambiar Logo' : 'Subir Logo'}
+                    </button>
+                    {c('hotel_logo') && (
+                      <button type="button" onClick={handleLogoDelete} className="text-red-500 hover:text-red-400 text-xs flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 hover:border-red-400/50 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" /> Eliminar
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           <div className="flex justify-end">
             <button type="submit" className="btn-primary"><Save className="w-4 h-4" /> Guardar Cambios</button>
           </div>

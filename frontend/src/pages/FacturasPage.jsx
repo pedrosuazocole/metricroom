@@ -1,6 +1,6 @@
-// src/pages/FacturasPage.jsx - Emisión de facturas SAR Honduras + vista previa de impresión
-import { useState, useEffect } from 'react'
-import { Plus, FileText, Printer, X, Eye, AlertTriangle } from 'lucide-react'
+// src/pages/FacturasPage.jsx - Facturación SAR Honduras con impresión profesional
+import { useState, useEffect, useRef } from 'react'
+import { Plus, FileText, Printer, X, Eye, AlertTriangle, Download } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 
@@ -11,7 +11,6 @@ export default function FacturasPage() {
   const [showEmitir, setShowEmitir] = useState(false)
   const [showVista, setShowVista] = useState(false)
   const [facturaDetalle, setFacturaDetalle] = useState(null)
-  const [hotelConfig, setHotelConfig] = useState({})
   const [form, setForm] = useState({
     huesped_id:'', cliente_nombre:'', cliente_rtn:'', cliente_direccion:'',
     metodo_pago:'EFECTIVO', moneda:'HNL', tasa_cambio:1, descuento:0, observaciones:'',
@@ -19,27 +18,21 @@ export default function FacturasPage() {
   })
 
   const cargar = async () => {
-    const [f, h, sar, conf] = await Promise.all([
+    const [f, h, sar] = await Promise.all([
       api.get('/facturas'),
       api.get('/huespedes', { params: { limit: 200 } }),
       api.get('/facturas/sar/config').catch(() => ({ data: { data: null } })),
-      api.get('/configuracion'),
     ])
     setFacturas(f.data.data || [])
     setHuespedes(h.data.data || [])
     setSarConfig(sar.data.data)
-    setHotelConfig(conf.data.data || {})
   }
 
   useEffect(() => { cargar() }, [])
 
   const autocompletar = (hId) => {
     const h = huespedes.find(x => x.id == hId)
-    if (h) setForm(p => ({
-      ...p, huesped_id: hId,
-      cliente_nombre: `${h.nombres} ${h.apellidos}`,
-      cliente_rtn: h.rtn || '',
-    }))
+    if (h) setForm(p => ({ ...p, huesped_id: hId, cliente_nombre: `${h.nombres} ${h.apellidos}`, cliente_rtn: h.rtn || '' }))
   }
 
   const addItem = () => setForm(p => ({ ...p, items: [...p.items, { descripcion:'', cantidad:1, precio_unitario:'', tipo_impuesto:'ISV' }] }))
@@ -84,8 +77,6 @@ export default function FacturasPage() {
     cargar()
   }
 
-  const imprimir = () => window.print()
-
   const tots = calcTotales()
 
   return (
@@ -102,30 +93,31 @@ export default function FacturasPage() {
         </div>
       )}
 
-      {/* Tabla de facturas */}
-      <div className="card p-0 overflow-x-auto"><table className="w-full">
-          <thead><tr>{['N° Factura','Cliente','RTN','Total','Impuesto','Método','Estado','Acciones'].map(h => <th key={h} className="table-header text-left">{h}</th>)}</tr></thead>
+      <div className="card p-0 overflow-x-auto">
+        <table className="w-full">
+          <thead><tr>{['N° Factura','Cliente','RTN','Total','ISV/IHT','Método','Estado','Acciones'].map(h => <th key={h} className="table-header text-left">{h}</th>)}</tr></thead>
           <tbody>
-            {facturas.length === 0 ? <tr><td colSpan={8} className="text-center py-12 text-slate-600">No hay facturas emitidas</td></tr>
-            : facturas.map(f => (
-              <tr key={f.id} className="table-row">
-                <td className="table-cell font-mono text-xs text-brand-400">{f.numero_factura}</td>
-                <td className="table-cell text-slate-300 text-sm">{f.cliente_nombre}</td>
-                <td className="table-cell text-slate-500 text-xs">{f.cliente_rtn || '—'}</td>
-                <td className="table-cell font-semibold text-slate-200">L. {f.total?.toFixed(2)}</td>
-                <td className="table-cell text-xs text-slate-400">ISV: {f.isv_15?.toFixed(2)} | IHT: {f.iht_4?.toFixed(2)}</td>
-                <td className="table-cell text-slate-400 text-xs">{f.metodo_pago}</td>
-                <td className="table-cell">
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${f.estado === 'EMITIDA' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>{f.estado}</span>
-                </td>
-                <td className="table-cell">
-                  <div className="flex gap-1">
-                    <button onClick={() => verDetalle(f.id)} className="text-brand-400 hover:text-brand-300 p-1" title="Ver e imprimir"><Eye className="w-4 h-4" /></button>
-                    {f.estado === 'EMITIDA' && <button onClick={() => anular(f.id)} className="text-red-500 hover:text-red-400 p-1" title="Anular"><X className="w-4 h-4" /></button>}
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {facturas.length === 0
+              ? <tr><td colSpan={8} className="text-center py-12 text-slate-600">No hay facturas emitidas</td></tr>
+              : facturas.map(f => (
+                <tr key={f.id} className="table-row">
+                  <td className="table-cell font-mono text-xs text-brand-400">{f.numero_factura}</td>
+                  <td className="table-cell text-slate-300 text-sm">{f.cliente_nombre}</td>
+                  <td className="table-cell text-slate-500 text-xs">{f.cliente_rtn || '—'}</td>
+                  <td className="table-cell font-semibold text-slate-200">L. {f.total?.toFixed(2)}</td>
+                  <td className="table-cell text-xs text-slate-400">L. {f.isv_15?.toFixed(2)} / L. {f.iht_4?.toFixed(2)}</td>
+                  <td className="table-cell text-slate-400 text-xs">{f.metodo_pago}</td>
+                  <td className="table-cell">
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${f.estado === 'EMITIDA' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-red-500/20 text-red-400 border-red-500/30'}`}>{f.estado}</span>
+                  </td>
+                  <td className="table-cell">
+                    <div className="flex gap-1">
+                      <button onClick={() => verDetalle(f.id)} className="text-brand-400 hover:text-brand-300 p-1" title="Ver e imprimir"><Eye className="w-4 h-4" /></button>
+                      {f.estado === 'EMITIDA' && <button onClick={() => anular(f.id)} className="text-red-500 hover:text-red-400 p-1" title="Anular"><X className="w-4 h-4" /></button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>
@@ -139,7 +131,6 @@ export default function FacturasPage() {
               <button onClick={() => setShowEmitir(false)}><X className="w-5 h-5 text-slate-500" /></button>
             </div>
             <form onSubmit={emitir} className="p-6 space-y-5">
-              {/* Datos del cliente */}
               <div>
                 <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Datos del Adquiriente</h3>
                 <div className="grid sm:grid-cols-2 gap-4">
@@ -164,8 +155,6 @@ export default function FacturasPage() {
                   </div>
                 </div>
               </div>
-
-              {/* Items */}
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Descripción de Servicios</h3>
@@ -189,8 +178,6 @@ export default function FacturasPage() {
                   ))}
                 </div>
               </div>
-
-              {/* Totales */}
               <div className="bg-slate-900/50 rounded-xl p-4 space-y-1 text-sm">
                 <div className="flex justify-between text-slate-400"><span>Exento</span><span>L. {tots.exento.toFixed(2)}</span></div>
                 <div className="flex justify-between text-slate-400"><span>Base ISV 15%</span><span>L. {tots.gravIsv.toFixed(2)}</span></div>
@@ -201,7 +188,6 @@ export default function FacturasPage() {
                   <span>TOTAL A PAGAR</span><span className="text-brand-400">L. {tots.total.toFixed(2)}</span>
                 </div>
               </div>
-
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
                   <label className="label">Método de Pago *</label>
@@ -214,7 +200,6 @@ export default function FacturasPage() {
                   <input type="number" step="0.01" value={form.descuento} onChange={e=>setForm(p=>({...p,descuento:e.target.value}))} className="input-field" />
                 </div>
               </div>
-
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setShowEmitir(false)} className="btn-secondary">Cancelar</button>
                 <button type="submit" className="btn-primary" disabled={!sarConfig}><FileText className="w-4 h-4" /> Emitir Factura</button>
@@ -224,93 +209,212 @@ export default function FacturasPage() {
         </div>
       )}
 
-      {/* Vista previa de impresión */}
+      {/* Modal Vista Previa de Impresión */}
       {showVista && facturaDetalle && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-white text-black rounded-xl w-full max-w-2xl max-h-[95vh] overflow-y-auto">
-            {/* Botones de acción (no imprimen) */}
-            <div className="no-print flex items-center justify-between p-4 border-b bg-gray-50 rounded-t-xl">
-              <h3 className="font-semibold text-gray-700">Vista Previa de Factura</h3>
-              <div className="flex gap-2">
-                <button onClick={imprimir} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"><Printer className="w-4 h-4" /> Imprimir</button>
-                <button onClick={() => setShowVista(false)} className="flex items-center gap-2 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-300"><X className="w-4 h-4" /> Cerrar</button>
-              </div>
-            </div>
-            {/* Contenido imprimible */}
-            <FacturaPrintable factura={facturaDetalle} hotel={facturaDetalle.hotel} />
-          </div>
-        </div>
+        <FacturaPrintModal
+          factura={facturaDetalle}
+          onClose={() => setShowVista(false)}
+        />
       )}
     </div>
   )
 }
 
-function FacturaPrintable({ factura, hotel }) {
-  if (!factura) return null
+// ─── Modal de impresión ───────────────────────────────────────────────────────
+function FacturaPrintModal({ factura, onClose }) {
+  const printRef = useRef()
+
+  const handlePrint = () => {
+    const content = printRef.current.innerHTML
+    const win = window.open('', '_blank', 'width=800,height=900')
+    win.document.write(`
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="UTF-8"/>
+        <title>Factura ${factura.numero_factura}</title>
+        <style>
+          * { margin:0; padding:0; box-sizing:border-box; }
+          body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; background: #fff; }
+          .factura-wrap { max-width: 720px; margin: 0 auto; padding: 28px 32px; }
+          .header { display:flex; align-items:flex-start; justify-content:space-between; border-bottom: 2px solid #1B3A6B; padding-bottom:16px; margin-bottom:16px; }
+          .hotel-info h1 { font-size:18px; font-weight:900; color:#1B3A6B; margin-bottom:3px; }
+          .hotel-info p { font-size:10px; color:#555; line-height:1.5; }
+          .factura-title { text-align:right; }
+          .factura-title .label { font-size:10px; color:#888; text-transform:uppercase; letter-spacing:1px; }
+          .factura-title .numero { font-size:15px; font-weight:900; color:#1B3A6B; margin:3px 0; }
+          .factura-title .fecha { font-size:10px; color:#555; }
+          .logo { max-height:70px; max-width:160px; object-fit:contain; margin-bottom:6px; }
+          .cai-box { background:#f0f4ff; border:1px solid #c7d7fe; border-radius:6px; padding:10px 14px; margin-bottom:14px; font-size:9.5px; color:#333; }
+          .cai-box p { line-height:1.7; }
+          .cai-box strong { color:#1B3A6B; }
+          .section-title { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#888; margin-bottom:6px; border-bottom:1px solid #e5e7eb; padding-bottom:3px; }
+          .adquiriente { display:grid; grid-template-columns:1fr 1fr; gap:4px 20px; margin-bottom:14px; font-size:10.5px; }
+          .adquiriente .row { display:flex; gap:6px; }
+          .adquiriente .key { color:#888; min-width:80px; }
+          .adquiriente .val { font-weight:600; color:#111; }
+          table { width:100%; border-collapse:collapse; margin-bottom:14px; font-size:10.5px; }
+          thead tr { background:#1B3A6B; color:#fff; }
+          thead th { padding:7px 8px; text-align:left; font-weight:600; font-size:10px; }
+          thead th:not(:first-child) { text-align:right; }
+          tbody tr { border-bottom:1px solid #f0f0f0; }
+          tbody tr:nth-child(even) { background:#f9faff; }
+          tbody td { padding:6px 8px; }
+          tbody td:not(:first-child) { text-align:right; }
+          .totales { margin-left:auto; width:280px; font-size:10.5px; }
+          .totales .row { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid #f0f0f0; }
+          .totales .row.grand { border-top:2px solid #1B3A6B; border-bottom:none; font-size:13px; font-weight:900; color:#1B3A6B; padding-top:6px; margin-top:4px; }
+          .totales .row.grand span:last-child { font-size:14px; }
+          .metodo { display:inline-block; background:#e0eaff; color:#1B3A6B; border-radius:4px; padding:2px 8px; font-size:9.5px; font-weight:700; margin-top:8px; }
+          .footer { margin-top:24px; border-top:1px dashed #ccc; padding-top:12px; text-align:center; font-size:9px; color:#999; line-height:1.8; }
+          .footer strong { color:#555; }
+          .anulada-stamp { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) rotate(-30deg); font-size:72px; font-weight:900; color:rgba(220,38,38,0.12); text-transform:uppercase; pointer-events:none; z-index:999; letter-spacing:8px; }
+          @media print {
+            body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+            .factura-wrap { padding: 10px 14px; }
+          }
+        </style>
+      </head>
+      <body>
+        ${content}
+        <script>window.onload = function(){ window.print(); }<\/script>
+      </body>
+      </html>
+    `)
+    win.document.close()
+  }
+
+  const h = factura.hotel || {}
+  const det = factura.detalle || []
+
   return (
-    <div className="p-8 font-mono text-xs" style={{ fontFamily: 'Arial, sans-serif' }}>
-      {/* Encabezado del hotel */}
-      <div className="text-center mb-6">
-        <h1 className="text-xl font-black">{hotel?.hotel_nombre || 'HOTEL'}</h1>
-        <p>{hotel?.hotel_direccion}</p>
-        <p>RTN: {hotel?.hotel_rtn} | Tel: {hotel?.hotel_telefono}</p>
-        <p>{hotel?.hotel_email}</p>
-      </div>
-      <div className="border-t-2 border-black my-2" />
-      <div className="text-center my-3">
-        <h2 className="text-base font-black">FACTURA</h2>
-        <p className="text-lg font-black">{factura.numero_factura}</p>
-      </div>
-      {/* CAI y datos SAR */}
-      <div className="bg-gray-100 border border-gray-300 rounded p-3 mb-4 text-[10px]">
-        <p><strong>CAI:</strong> {factura.cai}</p>
-        <p><strong>Fecha Límite Emisión:</strong> {factura.fecha_limite || '—'}</p>
-        <p><strong>Rango Autorizado:</strong> {factura.rango_inicio || '—'} al {factura.rango_fin || '—'}</p>
-      </div>
-      {/* Datos del adquiriente */}
-      <div className="mb-4">
-        <p><strong>Fecha:</strong> {new Date(factura.created_at).toLocaleDateString('es-HN')}</p>
-        <p><strong>Cliente:</strong> {factura.cliente_nombre}</p>
-        <p><strong>RTN/Cédula:</strong> {factura.cliente_rtn || 'CONSUMIDOR FINAL'}</p>
-        {factura.cliente_direccion && <p><strong>Dirección:</strong> {factura.cliente_direccion}</p>}
-      </div>
-      {/* Detalle */}
-      <table className="w-full border-collapse mb-4">
-        <thead>
-          <tr className="border-y border-gray-400">
-            <th className="text-left py-1">Descripción</th>
-            <th className="text-center py-1">Cant.</th>
-            <th className="text-right py-1">P.Unit.</th>
-            <th className="text-right py-1">Imp.</th>
-            <th className="text-right py-1">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(factura.detalle || []).map((d, i) => (
-            <tr key={i} className="border-b border-gray-200">
-              <td className="py-1">{d.descripcion}</td>
-              <td className="text-center py-1">{d.cantidad}</td>
-              <td className="text-right py-1">L. {d.precio_unitario?.toFixed(2)}</td>
-              <td className="text-center py-1">{d.tipo_impuesto}</td>
-              <td className="text-right py-1">L. {d.subtotal?.toFixed(2)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {/* Totales */}
-      <div className="border-t border-gray-400 pt-3 space-y-1">
-        {factura.subtotal_exento > 0 && <div className="flex justify-between"><span>Importe Exento</span><span>L. {factura.subtotal_exento?.toFixed(2)}</span></div>}
-        {factura.subtotal_gravado_isv > 0 && <div className="flex justify-between"><span>Base Imponible ISV 15%</span><span>L. {factura.subtotal_gravado_isv?.toFixed(2)}</span></div>}
-        {factura.isv_15 > 0 && <div className="flex justify-between"><span>ISV (15%)</span><span>L. {factura.isv_15?.toFixed(2)}</span></div>}
-        {factura.subtotal_gravado_iht > 0 && <div className="flex justify-between"><span>Base Imponible IHT 4%</span><span>L. {factura.subtotal_gravado_iht?.toFixed(2)}</span></div>}
-        {factura.iht_4 > 0 && <div className="flex justify-between"><span>IHT Turístico (4%)</span><span>L. {factura.iht_4?.toFixed(2)}</span></div>}
-        {factura.descuento > 0 && <div className="flex justify-between"><span>Descuento</span><span>-L. {factura.descuento?.toFixed(2)}</span></div>}
-        <div className="flex justify-between font-black text-base border-t border-black pt-2 mt-2"><span>TOTAL A PAGAR</span><span>L. {factura.total?.toFixed(2)}</span></div>
-        <div className="flex justify-between"><span>Método de Pago</span><span>{factura.metodo_pago}</span></div>
-      </div>
-      <div className="text-center text-[9px] text-gray-500 mt-6">
-        <p>Este documento es una representación impresa de una Factura emitida conforme a SAR Honduras.</p>
-        <p>Conserve su factura. Sin ella no hay garantía de servicio.</p>
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+      <div className="bg-white text-black rounded-xl w-full max-w-2xl max-h-[95vh] flex flex-col shadow-2xl">
+
+        {/* Barra de acciones */}
+        <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b rounded-t-xl flex-shrink-0">
+          <span className="font-semibold text-gray-700 text-sm">Vista Previa — Factura {factura.numero_factura}</span>
+          <div className="flex gap-2">
+            <button onClick={handlePrint}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm hover:bg-blue-700 font-medium">
+              <Printer className="w-4 h-4" /> Imprimir / PDF
+            </button>
+            <button onClick={onClose}
+              className="flex items-center gap-2 bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-300">
+              <X className="w-4 h-4" /> Cerrar
+            </button>
+          </div>
+        </div>
+
+        {/* Contenido scrollable */}
+        <div className="overflow-y-auto flex-1 bg-gray-100 p-4">
+          <div ref={printRef}>
+            <div className="factura-wrap bg-white rounded shadow-sm" style={{maxWidth:'720px',margin:'0 auto',padding:'28px 32px',fontFamily:'Arial,Helvetica,sans-serif',fontSize:'11px',color:'#111'}}>
+
+              {factura.estado === 'ANULADA' && (
+                <div style={{position:'relative'}}>
+                  <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%) rotate(-30deg)',fontSize:'72px',fontWeight:900,color:'rgba(220,38,38,0.10)',textTransform:'uppercase',pointerEvents:'none',letterSpacing:'8px',zIndex:1}}>ANULADA</div>
+                </div>
+              )}
+
+              {/* ENCABEZADO */}
+              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',borderBottom:'2px solid #1B3A6B',paddingBottom:'16px',marginBottom:'16px'}}>
+                <div>
+                  {h.hotel_logo && (
+                    <img src={h.hotel_logo} alt="Logo" style={{maxHeight:'70px',maxWidth:'160px',objectFit:'contain',marginBottom:'6px'}} />
+                  )}
+                  <div style={{fontSize:'18px',fontWeight:900,color:'#1B3A6B',marginBottom:'3px'}}>{h.hotel_nombre || 'HOTEL'}</div>
+                  <div style={{fontSize:'10px',color:'#555',lineHeight:'1.6'}}>
+                    <div>{h.hotel_direccion}</div>
+                    {h.hotel_ciudad && <div>{h.hotel_ciudad}, {h.hotel_pais || 'Honduras'}</div>}
+                    <div>Tel: {h.hotel_telefono} {h.hotel_email ? `| ${h.hotel_email}` : ''}</div>
+                    {h.hotel_web && <div>{h.hotel_web}</div>}
+                  </div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:'10px',color:'#888',textTransform:'uppercase',letterSpacing:'1px'}}>Factura</div>
+                  <div style={{fontSize:'15px',fontWeight:900,color:'#1B3A6B',margin:'3px 0',fontFamily:'monospace'}}>{factura.numero_factura}</div>
+                  <div style={{fontSize:'10px',color:'#555'}}>{new Date(factura.created_at).toLocaleDateString('es-HN',{day:'2-digit',month:'long',year:'numeric'})}</div>
+                  <div style={{fontSize:'10px',color:'#888',marginTop:'4px'}}>RTN: <strong style={{color:'#1B3A6B'}}>{h.hotel_rtn}</strong></div>
+                </div>
+              </div>
+
+              {/* CAI */}
+              <div style={{background:'#f0f4ff',border:'1px solid #c7d7fe',borderRadius:'6px',padding:'10px 14px',marginBottom:'14px',fontSize:'9.5px',color:'#333'}}>
+                <div style={{marginBottom:'2px'}}><strong style={{color:'#1B3A6B'}}>CAI:</strong> {factura.cai}</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px'}}>
+                  <div><strong>Fecha Límite Emisión:</strong> {factura.fecha_limite_emision || '—'}</div>
+                  <div><strong>Rango Autorizado:</strong> {factura.rango_inicial || '—'} al {factura.rango_final || '—'}</div>
+                </div>
+              </div>
+
+              {/* ADQUIRIENTE */}
+              <div style={{marginBottom:'14px'}}>
+                <div style={{fontSize:'9px',fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',color:'#888',marginBottom:'6px',borderBottom:'1px solid #e5e7eb',paddingBottom:'3px'}}>Datos del Adquiriente</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'3px 20px',fontSize:'10.5px'}}>
+                  <div><span style={{color:'#888',marginRight:'6px'}}>Cliente:</span><strong>{factura.cliente_nombre}</strong></div>
+                  <div><span style={{color:'#888',marginRight:'6px'}}>RTN/Cédula:</span><strong>{factura.cliente_rtn || 'CONSUMIDOR FINAL'}</strong></div>
+                  {factura.cliente_direccion && <div style={{gridColumn:'1/-1'}}><span style={{color:'#888',marginRight:'6px'}}>Dirección:</span>{factura.cliente_direccion}</div>}
+                </div>
+              </div>
+
+              {/* DETALLE */}
+              <table style={{width:'100%',borderCollapse:'collapse',marginBottom:'14px',fontSize:'10.5px'}}>
+                <thead>
+                  <tr style={{background:'#1B3A6B',color:'#fff'}}>
+                    <th style={{padding:'7px 8px',textAlign:'left',fontWeight:600,fontSize:'10px'}}>Descripción</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontWeight:600,fontSize:'10px'}}>Cant.</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontWeight:600,fontSize:'10px'}}>P. Unitario</th>
+                    <th style={{padding:'7px 8px',textAlign:'center',fontWeight:600,fontSize:'10px'}}>Impuesto</th>
+                    <th style={{padding:'7px 8px',textAlign:'right',fontWeight:600,fontSize:'10px'}}>Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {det.map((d, i) => (
+                    <tr key={i} style={{borderBottom:'1px solid #f0f0f0',background: i%2===1 ? '#f9faff' : '#fff'}}>
+                      <td style={{padding:'6px 8px'}}>{d.descripcion}</td>
+                      <td style={{padding:'6px 8px',textAlign:'right'}}>{d.cantidad}</td>
+                      <td style={{padding:'6px 8px',textAlign:'right'}}>L. {Number(d.precio_unitario).toFixed(2)}</td>
+                      <td style={{padding:'6px 8px',textAlign:'center',fontSize:'9px'}}>{d.tipo_impuesto}</td>
+                      <td style={{padding:'6px 8px',textAlign:'right',fontWeight:600}}>L. {Number(d.subtotal).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* TOTALES */}
+              <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'16px'}}>
+                <div style={{width:'280px',fontSize:'10.5px'}}>
+                  {factura.subtotal_exento > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:'1px solid #f0f0f0'}}><span style={{color:'#666'}}>Importe Exento</span><span>L. {Number(factura.subtotal_exento).toFixed(2)}</span></div>}
+                  {factura.subtotal_gravado_iht > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:'1px solid #f0f0f0'}}><span style={{color:'#666'}}>Base IHT 4%</span><span>L. {Number(factura.subtotal_gravado_iht).toFixed(2)}</span></div>}
+                  {factura.iht_4 > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:'1px solid #f0f0f0'}}><span style={{color:'#666'}}>IHT Turístico (4%)</span><span>L. {Number(factura.iht_4).toFixed(2)}</span></div>}
+                  {factura.subtotal_gravado_isv > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:'1px solid #f0f0f0'}}><span style={{color:'#666'}}>Base ISV 15%</span><span>L. {Number(factura.subtotal_gravado_isv).toFixed(2)}</span></div>}
+                  {factura.isv_15 > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:'1px solid #f0f0f0'}}><span style={{color:'#666'}}>ISV (15%)</span><span>L. {Number(factura.isv_15).toFixed(2)}</span></div>}
+                  {factura.descuento > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',borderBottom:'1px solid #f0f0f0',color:'#dc2626'}}><span>Descuento</span><span>-L. {Number(factura.descuento).toFixed(2)}</span></div>}
+                  <div style={{display:'flex',justifyContent:'space-between',borderTop:'2px solid #1B3A6B',paddingTop:'6px',marginTop:'4px',fontSize:'13px',fontWeight:900,color:'#1B3A6B'}}>
+                    <span>TOTAL A PAGAR</span><span style={{fontSize:'14px'}}>L. {Number(factura.total).toFixed(2)}</span>
+                  </div>
+                  <div style={{marginTop:'6px'}}>
+                    <span style={{display:'inline-block',background:'#e0eaff',color:'#1B3A6B',borderRadius:'4px',padding:'2px 8px',fontSize:'9.5px',fontWeight:700}}>
+                      {factura.metodo_pago}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* PIE */}
+              <div style={{marginTop:'20px',borderTop:'1px dashed #ccc',paddingTop:'12px',textAlign:'center',fontSize:'9px',color:'#999',lineHeight:'1.8'}}>
+                {h.factura_pie
+                  ? <p style={{color:'#555',marginBottom:'4px'}}>{h.factura_pie}</p>
+                  : null}
+                <p>Este documento es una representación impresa de una Factura emitida conforme a SAR Honduras.</p>
+                <p>Conserve su factura. Sin ella no hay garantía de servicio.</p>
+                <p style={{marginTop:'4px',color:'#bbb'}}>Generado por <strong style={{color:'#1B3A6B'}}>MetricRoom</strong> · {new Date().toLocaleString('es-HN')}</p>
+              </div>
+
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )

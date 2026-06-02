@@ -259,10 +259,10 @@ export default function CheckInsPage() {
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => { window.open(`/api/facturas/${facturaCheckout.factura_id}`, '_blank'); setFacturaCheckout(null) }}
+                onClick={() => { window.location.href = '/facturas'; setFacturaCheckout(null) }}
                 className="flex-1 btn-secondary flex items-center justify-center gap-2"
               >
-                <Printer className="w-4 h-4" /> Ver Factura
+                <Printer className="w-4 h-4" /> Ir a Facturas
               </button>
               <button
                 onClick={() => setFacturaCheckout(null)}
