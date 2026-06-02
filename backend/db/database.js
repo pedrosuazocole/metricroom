@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 
 // Ruta persistente para Railway: usar variable de entorno o ruta local
-const DB_PATH = process.env.DATABASE_PATH || path.join(__dirname, '..', 'data', 'metricroom.db');
+const DB_PATH = process.env.DATABASE_PATH || '/data/metricroom.db';
 
 // Garantizar que el directorio existe
 const dbDir = path.dirname(DB_PATH);
