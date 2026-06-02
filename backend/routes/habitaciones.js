@@ -43,7 +43,7 @@ router.get('/planning', (req, res) => {
         COALESCE((
           SELECT SUM(subtotal) FROM servicios_extras se WHERE se.checkin_id = c.id
         ), 0) + COALESCE(r.tarifa_aplicada, 0) * CAST(
-          (julianday(COALESCE(c.fecha_checkout_prevista, date('now'))) - julianday(COALESCE(c.fecha_checkin, date('now'))))
+          (julianday(COALESCE(c.fecha_checkout_prevista, date(\'now\'))) - julianday(COALESCE(c.fecha_checkin, date(\'now\'))))
           AS INTEGER)
         AS saldo_estimado
       FROM habitaciones h
@@ -139,7 +139,7 @@ router.put('/:id', (req, res) => {
         descripcion = COALESCE(?, descripcion),
         amenidades = COALESCE(?, amenidades),
         activa = COALESCE(?, activa),
-        updated_at = datetime('now','localtime')
+        updated_at = datetime(\'now\',\'localtime\')
       WHERE id = ?
     `).run(numero, piso, tipo, capacidad, precio_base, precio_corporativo, descripcion,
            amenidades ? JSON.stringify(amenidades) : undefined, activa, req.params.id);
@@ -162,7 +162,7 @@ router.patch('/:id/estado', (req, res) => {
       return res.status(400).json({ ok: false, error: 'Estado inválido' });
     }
 
-    db.prepare('UPDATE habitaciones SET estado = ?, updated_at = datetime('now','localtime') WHERE id = ?')
+    db.prepare('UPDATE habitaciones SET estado = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?')
       .run(estado, req.params.id);
 
     res.json({ ok: true, message: `Estado cambiado a ${estado}` });

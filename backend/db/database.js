@@ -48,8 +48,8 @@ function initSchema() {
       descripcion TEXT,
       amenidades TEXT, -- JSON array
       activa INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
-      updated_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -74,8 +74,8 @@ function initSchema() {
       pais TEXT DEFAULT 'Honduras',
       observaciones TEXT,
       vip INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
-      updated_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -104,8 +104,8 @@ function initSchema() {
       notas TEXT,
       origen TEXT DEFAULT 'MOSTRADOR' CHECK(origen IN ('MOSTRADOR','ONLINE','TELEFONO','AGENCIA','CORPORATIVO')),
       created_by TEXT,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
-      updated_at TEXT DEFAULT (datetime('now','localtime')),
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
       FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
     );
@@ -124,7 +124,7 @@ function initSchema() {
       estado TEXT DEFAULT 'ACTIVO' CHECK(estado IN ('ACTIVO','CHECKOUT','CANCELADO')),
       observaciones TEXT,
       atendido_por TEXT,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (reserva_id) REFERENCES reservas(id),
       FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
       FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
@@ -142,7 +142,7 @@ function initSchema() {
       subtotal REAL NOT NULL,
       categoria TEXT DEFAULT 'SERVICIO' 
         CHECK(categoria IN ('MINIBAR','RESTAURANTE','LAVANDERIA','TELEFONO','TRANSPORTE','OTROS','SERVICIO')),
-      fecha TEXT DEFAULT (datetime('now','localtime')),
+      fecha TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (checkin_id) REFERENCES checkins(id)
     );
 
@@ -160,7 +160,7 @@ function initSchema() {
       punto_emision TEXT DEFAULT '001',
       tipo_documento TEXT DEFAULT '01',
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -191,7 +191,7 @@ function initSchema() {
       impresa INTEGER DEFAULT 0,
       enviada_email INTEGER DEFAULT 0,
       created_by TEXT,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (checkin_id) REFERENCES checkins(id),
       FOREIGN KEY (huesped_id) REFERENCES huespedes(id)
     );
@@ -218,7 +218,7 @@ function initSchema() {
       fecha TEXT NOT NULL,
       usd_a_hnl REAL NOT NULL,
       fuente TEXT DEFAULT 'MANUAL',
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -237,7 +237,7 @@ function initSchema() {
       dias_credito INTEGER DEFAULT 30,
       descuento_habitaciones REAL DEFAULT 0,
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -255,7 +255,7 @@ function initSchema() {
       condiciones_pago TEXT,
       dias_credito INTEGER DEFAULT 0,
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -269,7 +269,7 @@ function initSchema() {
       saldo_pendiente REAL NOT NULL,
       fecha_vencimiento TEXT,
       estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE','PARCIAL','PAGADA','VENCIDA')),
-      created_at TEXT DEFAULT (datetime('now','localtime')),
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (factura_id) REFERENCES facturas(id),
       FOREIGN KEY (cliente_id) REFERENCES clientes_corporativos(id)
     );
@@ -286,7 +286,7 @@ function initSchema() {
       saldo_pendiente REAL NOT NULL,
       fecha_vencimiento TEXT,
       estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE','PARCIAL','PAGADA','VENCIDA')),
-      created_at TEXT DEFAULT (datetime('now','localtime')),
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
     );
 
@@ -305,7 +305,7 @@ function initSchema() {
       proveedor_id INTEGER,
       ubicacion TEXT,
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now','localtime')),
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
     );
 
@@ -320,7 +320,7 @@ function initSchema() {
       motivo TEXT,
       referencia TEXT,
       usuario TEXT,
-      fecha TEXT DEFAULT (datetime('now','localtime')),
+      fecha TEXT DEFAULT (datetime(\'now\',\'localtime\')),
       FOREIGN KEY (inventario_id) REFERENCES inventario(id)
     );
 
@@ -342,7 +342,7 @@ function initSchema() {
       aplica_viernes INTEGER DEFAULT 1,
       aplica_sabado INTEGER DEFAULT 1,
       activa INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -356,7 +356,7 @@ function initSchema() {
       canal TEXT DEFAULT 'WHATSAPP',
       estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE','ENVIADO','ERROR')),
       respuesta TEXT,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -367,7 +367,7 @@ function initSchema() {
       clave TEXT NOT NULL UNIQUE,
       valor TEXT,
       descripcion TEXT,
-      updated_at TEXT DEFAULT (datetime('now','localtime'))
+      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -382,7 +382,7 @@ function initSchema() {
       email TEXT,
       activo INTEGER DEFAULT 1,
       last_login TEXT,
-      created_at TEXT DEFAULT (datetime('now','localtime'))
+      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
     );
 
     -- =============================================
@@ -460,7 +460,7 @@ function seedInitialData() {
   // Tasa de cambio inicial
   const tasaExiste = db.prepare('SELECT id FROM tasa_cambio LIMIT 1').get();
   if (!tasaExiste) {
-    db.prepare('INSERT INTO tasa_cambio (fecha, usd_a_hnl) VALUES (date('now'), ?)').run(24.85);
+    db.prepare('INSERT INTO tasa_cambio (fecha, usd_a_hnl) VALUES (date(\'now\'), ?)').run(24.85);
   }
 
   // Temporada por defecto

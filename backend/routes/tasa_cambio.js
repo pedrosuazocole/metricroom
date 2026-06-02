@@ -15,7 +15,7 @@ router.post('/', (req, res) => {
     const db = getDB();
     const { usd_a_hnl, fuente } = req.body;
     if (!usd_a_hnl || usd_a_hnl <= 0) return res.status(400).json({ ok: false, error: 'Tasa inválida' });
-    const r = db.prepare('INSERT INTO tasa_cambio (fecha, usd_a_hnl, fuente) VALUES (date('now'), ?, ?)').run(usd_a_hnl, fuente || 'MANUAL');
+    const r = db.prepare('INSERT INTO tasa_cambio (fecha, usd_a_hnl, fuente) VALUES (date(\'now\'), ?, ?)').run(usd_a_hnl, fuente || 'MANUAL');
     res.status(201).json({ ok: true, data: { id: r.lastInsertRowid, usd_a_hnl } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

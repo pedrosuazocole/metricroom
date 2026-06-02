@@ -187,7 +187,7 @@ router.patch('/:id/estado', (req, res) => {
     const reserva = db.prepare('SELECT * FROM reservas WHERE id = ?').get(req.params.id);
     if (!reserva) return res.status(404).json({ ok: false, error: 'Reserva no encontrada' });
 
-    db.prepare('UPDATE reservas SET estado = ?, updated_at = datetime('now','localtime') WHERE id = ?')
+    db.prepare('UPDATE reservas SET estado = ?, updated_at = datetime(\'now\',\'localtime\') WHERE id = ?')
       .run(estado, req.params.id);
 
     // Si se cancela, liberar habitación
@@ -211,7 +211,7 @@ router.delete('/:id', (req, res) => {
       return res.status(400).json({ ok: false, error: 'No se puede cancelar una reserva con check-in activo' });
     }
 
-    db.prepare(`UPDATE reservas SET estado = 'CANCELADA', updated_at = datetime('now','localtime') WHERE id = ?`)
+    db.prepare(`UPDATE reservas SET estado = 'CANCELADA', updated_at = datetime(\'now\',\'localtime\') WHERE id = ?`)
       .run(req.params.id);
     db.prepare(`UPDATE habitaciones SET estado = 'DISPONIBLE' WHERE id = ?`).run(reserva.habitacion_id);
 

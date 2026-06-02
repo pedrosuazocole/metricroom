@@ -15,7 +15,7 @@ router.get('/', (req, res) => {
 router.put('/', (req, res) => {
   try {
     const db = getDB();
-    const update = db.prepare('UPDATE configuracion_hotel SET valor=?, updated_at=datetime('now','localtime') WHERE clave=?');
+    const update = db.prepare('UPDATE configuracion_hotel SET valor=?, updated_at=datetime(\'now\',\'localtime\') WHERE clave=?');
     const insert = db.prepare('INSERT OR IGNORE INTO configuracion_hotel (clave, valor) VALUES (?,?)');
     Object.entries(req.body).forEach(([k, v]) => {
       insert.run(k, v);
