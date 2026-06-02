@@ -238,7 +238,6 @@ export default function CheckInsPage() {
           </div>
         </div>
       )}
-    </div>
       {/* Modal: Factura generada en checkout */}
       {facturaCheckout && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -275,5 +274,6 @@ export default function CheckInsPage() {
           </div>
         </div>
       )}
+    </div>
   )
 }

@@ -67,7 +67,6 @@ router.post('/', (req, res) => {
       return res.status(400).json({ ok: false, error: `La reserva está en estado ${reserva.estado}` });
     }
 
-    // Verificar no hay checkin activo en esa habitación
     const checkinActivo = db.prepare(
       `SELECT id FROM checkins WHERE habitacion_id = ? AND estado = 'ACTIVO'`
     ).get(reserva.habitacion_id);
@@ -75,10 +74,9 @@ router.post('/', (req, res) => {
       return res.status(409).json({ ok: false, error: 'La habitación ya tiene un check-in activo' });
     }
 
-    // Transacción atómica
     const doCheckin = db.transaction(() => {
       const result = db.prepare(`
-        INSERT INTO checkins (reserva_id, huesped_id, habitacion_id, fecha_checkin, 
+        INSERT INTO checkins (reserva_id, huesped_id, habitacion_id, fecha_checkin,
           fecha_checkout_prevista, estado, observaciones, atendido_por)
         VALUES (?, ?, ?, datetime('now','localtime'), ?, 'ACTIVO', ?, ?)
       `).run(reserva_id, reserva.huesped_id, reserva.habitacion_id,
@@ -94,7 +92,6 @@ router.post('/', (req, res) => {
 
     const checkinId = doCheckin();
 
-    // Notificación WhatsApp
     const huesped = db.prepare('SELECT * FROM huespedes WHERE id = ?').get(reserva.huesped_id);
     const hab = db.prepare('SELECT numero FROM habitaciones WHERE id = ?').get(reserva.habitacion_id);
     if (huesped?.telefono) {
@@ -147,27 +144,31 @@ router.post('/:id/checkout', (req, res) => {
     let numeroFactura = null;
 
     const doCheckout = db.transaction(() => {
-      // 1. Cerrar checkin
+      // FIX 1: Quitar los backslashes incorrectos en datetime()
       db.prepare(`
-        UPDATE checkins SET estado = 'CHECKOUT', fecha_checkout_real = datetime(\'now\',\'localtime\'),
+        UPDATE checkins SET estado = 'CHECKOUT', fecha_checkout_real = datetime('now','localtime'),
           observaciones = COALESCE(?, observaciones)
         WHERE id = ?
       `).run(observaciones, req.params.id);
 
-      db.prepare(`UPDATE reservas SET estado = 'CHECKOUT', updated_at = datetime(\'now\',\'localtime\') WHERE id = ?`)
+      db.prepare(`UPDATE reservas SET estado = 'CHECKOUT', updated_at = datetime('now','localtime') WHERE id = ?`)
         .run(checkin.reserva_id);
 
-      db.prepare(`UPDATE habitaciones SET estado = 'SUCIA', updated_at = datetime(\'now\',\'localtime\') WHERE id = ?`)
+      db.prepare(`UPDATE habitaciones SET estado = 'SUCIA', updated_at = datetime('now','localtime') WHERE id = ?`)
         .run(checkin.habitacion_id);
 
-      // 2. Generar factura automática si hay config SAR activa
+      // FIX 2: Verificar rango SAR antes de emitir (igual que en facturas.js)
       if (generar_factura) {
         const sarConfig = db.prepare('SELECT * FROM configuracion_sar WHERE activo = 1 ORDER BY id DESC LIMIT 1').get();
         if (sarConfig) {
-          // Construir ítems de factura
+          // FIX 3: Validar que el correlativo no supere el rango_final
+          const correlativoFinal = parseInt(sarConfig.rango_final.split('-').pop());
+          if (sarConfig.correlativo_actual > correlativoFinal) {
+            throw new Error('Se agotó el rango de facturación SAR. Configure un nuevo CAI.');
+          }
+
           const items = [];
 
-          // Cargo por habitación (IHT 4% turístico)
           items.push({
             descripcion: `Hospedaje ${noches} noche(s)`,
             cantidad: noches,
@@ -176,7 +177,6 @@ router.post('/:id/checkout', (req, res) => {
             subtotal: cargoHab,
           });
 
-          // Servicios extras (ISV 15%)
           extras.forEach(ex => {
             items.push({
               descripcion: ex.descripcion,
@@ -187,7 +187,6 @@ router.post('/:id/checkout', (req, res) => {
             });
           });
 
-          // Calcular totales
           let subtotal_gravado_isv = 0, subtotal_gravado_iht = 0, subtotal_exento = 0;
           items.forEach(it => {
             if (it.tipo_impuesto === 'ISV') subtotal_gravado_isv += it.subtotal;
@@ -198,12 +197,12 @@ router.post('/:id/checkout', (req, res) => {
           const iht_4  = subtotal_gravado_iht * TASA_IHT;
           const total  = subtotal_exento + subtotal_gravado_isv + subtotal_gravado_iht + isv_15 + iht_4;
 
-          // Número de factura SAR
           const correlativo = sarConfig.correlativo_actual;
           numeroFactura = `${sarConfig.establecimiento}-${sarConfig.punto_emision}-${sarConfig.tipo_documento}-${String(correlativo).padStart(8, '0')}`;
+
+          // FIX 4: Incrementar correlativo DENTRO de la transacción (atómico)
           db.prepare('UPDATE configuracion_sar SET correlativo_actual = correlativo_actual + 1 WHERE id = ?').run(sarConfig.id);
 
-          // Insertar factura
           const fRes = db.prepare(`
             INSERT INTO facturas (
               numero_factura, cai, checkin_id, reserva_id, huesped_id,
@@ -224,7 +223,6 @@ router.post('/:id/checkout', (req, res) => {
 
           facturaId = fRes.lastInsertRowid;
 
-          // Insertar detalles
           const insertDet = db.prepare(`
             INSERT INTO detalle_facturas (factura_id, descripcion, cantidad, precio_unitario, tipo_impuesto, subtotal)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -236,7 +234,6 @@ router.post('/:id/checkout', (req, res) => {
 
     doCheckout();
 
-    // Notificación WhatsApp
     if (huesped?.telefono) {
       const totalMsg = cargoHab + totalExtras;
       const msg = `🏨 *MetricRoom* - Check-Out Confirmado\n` +
@@ -300,8 +297,6 @@ router.get('/:id/extras', (req, res) => {
   }
 });
 
-module.exports = router;
-
 // POST /api/checkins/:id/cambio-habitacion
 router.post('/:id/cambio-habitacion', (req, res) => {
   try {
@@ -316,13 +311,9 @@ router.post('/:id/cambio-habitacion', (req, res) => {
     if (!nueva) return res.status(409).json({ ok: false, error: 'La habitación destino no está disponible' });
 
     const doCambio = db.transaction(() => {
-      // Liberar habitación anterior
       db.prepare(`UPDATE habitaciones SET estado = 'DISPONIBLE' WHERE id = ?`).run(checkin.habitacion_id);
-      // Ocupar nueva habitación
       db.prepare(`UPDATE habitaciones SET estado = 'OCUPADA' WHERE id = ?`).run(nueva_habitacion_id);
-      // Actualizar el check-in
       db.prepare('UPDATE checkins SET habitacion_id = ? WHERE id = ?').run(nueva_habitacion_id, req.params.id);
-      // Actualizar la reserva
       db.prepare('UPDATE reservas SET habitacion_id = ? WHERE id = ?').run(nueva_habitacion_id, checkin.reserva_id);
     });
 
@@ -332,3 +323,5 @@ router.post('/:id/cambio-habitacion', (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+module.exports = router;

@@ -1,28 +1,20 @@
 # ============================================================
-# MetricRoom — Dockerfile definitivo para Railway
-# Usa node:20-bullseye-slim con todas las herramientas
+# MetricRoom — Dockerfile optimizado para Railway
 # ============================================================
 
-# ---- Etapa 1: Compilar better-sqlite3 y dependencias ----
-FROM node:20-bullseye-slim AS deps-builder
-
-RUN apt-get update && apt-get install -y \
-    python3 make g++ \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+# ---- Etapa 1: Compilar better-sqlite3 ----
+FROM node:20-bullseye AS deps-builder
 
 WORKDIR /app
-COPY backend/package.json ./
-
-# npm install compila mejor-sqlite3 desde source en este entorno correcto
-RUN npm install
+COPY backend/package*.json ./
+RUN npm ci --omit=dev
 
 # ---- Etapa 2: Build Frontend ----
-FROM node:20-bullseye-slim AS frontend-builder
+FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm install --silent
+RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
@@ -31,17 +23,11 @@ FROM node:20-bullseye-slim AS runtime
 
 WORKDIR /app
 
-# Copiar node_modules ya compilados (incluye better-sqlite3 compilado)
 COPY --from=deps-builder /app/node_modules ./node_modules
 COPY --from=deps-builder /app/package.json ./
-
-# Copiar código del backend
 COPY backend/ ./
-
-# Copiar build del frontend
 COPY --from=frontend-builder /app/frontend/dist ./public
 
-# Directorio para SQLite persistente
 RUN mkdir -p /data
 
 EXPOSE 3001
