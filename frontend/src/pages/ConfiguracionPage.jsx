@@ -34,7 +34,18 @@ export default function ConfiguracionPage() {
         api.get('/tasa-cambio/historial').catch(() => ({ data: { data: [] } })),
       ])
       setConfig(conf.data.data || {})
-      if (sar.data.data) setSarConfig(sar.data.data)
+      if (sar.data.data) {
+        const s = sar.data.data
+        setSarConfig({
+          cai: s.cai || '',
+          rango_inicio: s.rango_inicial || s.rango_inicio || '',
+          rango_fin: s.rango_final || s.rango_fin || '',
+          fecha_limite: s.fecha_limite_emision || s.fecha_limite || '',
+          punto_emision: s.establecimiento && s.punto_emision && s.tipo_documento
+            ? `${s.establecimiento}-${s.punto_emision}-${s.tipo_documento}`
+            : s.punto_emision || '001-001-01',
+        })
+      }
       setTasaActual(t.data.data)
       setHistorialTasa(hist.data.data || [])
     } finally { setLoading(false) }
@@ -51,7 +62,18 @@ export default function ConfiguracionPage() {
 
   const guardarSar = async (e) => {
     e.preventDefault()
-    await api.post('/facturas/sar/config', sarConfig)
+    // Parse punto_emision "est-pto-tipo" into separate fields
+    const partes = (sarConfig.punto_emision || '001-001-01').split('-')
+    const payload = {
+      cai: sarConfig.cai,
+      rango_inicial: sarConfig.rango_inicio,
+      rango_final: sarConfig.rango_fin,
+      fecha_limite_emision: sarConfig.fecha_limite,
+      establecimiento: partes[0] || '001',
+      punto_emision: partes[1] || '001',
+      tipo_documento: partes[2] || '01',
+    }
+    await api.post('/facturas/sar/config', payload)
     toast.success('Configuración SAR guardada')
   }
 
