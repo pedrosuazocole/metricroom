@@ -1,16 +1,16 @@
 # ============================================================
-# MetricRoom — Dockerfile optimizado para Railway
+# MetricRoom — Dockerfile para Railway
 # ============================================================
 
-# ---- Etapa 1: Compilar better-sqlite3 ----
+# ---- Etapa 1: Compilar better-sqlite3 (necesita python3/make/g++) ----
 FROM node:20-bullseye AS deps-builder
 
 WORKDIR /app
 COPY backend/package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # ---- Etapa 2: Build Frontend ----
-FROM node:20-alpine AS frontend-builder
+FROM node:20-bullseye AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -18,7 +18,7 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# ---- Etapa 3: Runtime final ----
+# ---- Etapa 3: Runtime final (imagen slim) ----
 FROM node:20-bullseye-slim AS runtime
 
 WORKDIR /app
