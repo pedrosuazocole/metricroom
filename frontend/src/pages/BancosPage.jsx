@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { Landmark, Plus, X, ArrowDown, ArrowUp, RefreshCw, CreditCard } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import { useTasaCambio } from '../context/TasaCambioContext'
 
 const TIPOS_BANCO   = ['NACIONAL', 'INTERNACIONAL', 'COOPERATIVA']
 const TIPOS_CUENTA  = ['CORRIENTE', 'AHORRO', 'INVERSIONES']
@@ -18,6 +19,7 @@ const MOV_ICON = {
 const esIngreso = (tipo) => ['DEPOSITO','INTERES'].includes(tipo)
 
 export default function BancosPage() {
+  const { tasaVenta, tieneTasa, aDolares, aLempiras } = useTasaCambio() || {}
   const [bancos, setBancos]             = useState([])
   const [cuentas, setCuentas]           = useState([])
   const [movimientos, setMovimientos]   = useState([])
@@ -137,6 +139,13 @@ export default function BancosPage() {
                   <p className={`text-xl font-bold ${c.moneda==='HNL'?'text-emerald-400':'text-brand-400'}`}>
                     {c.moneda==='HNL'?'L.':'$'} {parseFloat(c.saldo_actual||0).toLocaleString(c.moneda==='HNL'?'es-HN':'en-US',{minimumFractionDigits:2})}
                   </p>
+                  {tieneTasa && (
+                    <p className="text-xs text-slate-500">
+                      {c.moneda==='HNL'
+                        ? `≈ $${aDolares(c.saldo_actual||0).toLocaleString('en-US',{minimumFractionDigits:2})}`
+                        : `≈ L. ${aLempiras(c.saldo_actual||0).toLocaleString('es-HN',{minimumFractionDigits:2})}`}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 justify-end mt-1">
                     <span className="text-xs text-slate-500">{c.moneda}</span>
                     <button onClick={ev=>{ev.stopPropagation(); setCuentaForm({...c}); setShowCuenta(true)}}
@@ -166,6 +175,13 @@ export default function BancosPage() {
                 <p className={`text-3xl font-black ${cuentaActiva.moneda==='HNL'?'text-emerald-400':'text-brand-400'}`}>
                   {cuentaActiva.moneda==='HNL'?'L.':'$'} {parseFloat(cuentaActiva.saldo_actual||0).toLocaleString(cuentaActiva.moneda==='HNL'?'es-HN':'en-US',{minimumFractionDigits:2})}
                 </p>
+                {tieneTasa && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    {cuentaActiva.moneda==='HNL'
+                      ? `≈ $${aDolares(cuentaActiva.saldo_actual||0).toLocaleString('en-US',{minimumFractionDigits:2})}`
+                      : `≈ L. ${aLempiras(cuentaActiva.saldo_actual||0).toLocaleString('es-HN',{minimumFractionDigits:2})}`}
+                  </p>
+                )}
               </div>
               <button onClick={()=>setShowMov(true)} className="btn-primary w-full justify-center">
                 <Plus className="w-4 h-4"/> Registrar Movimiento

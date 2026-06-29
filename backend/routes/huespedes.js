@@ -39,17 +39,17 @@ router.post('/', (req, res) => {
   try {
     const db = getDB();
     const { nombres, apellidos, tipo_doc, numero_doc, rtn, email, telefono, telefono2,
-      nacionalidad, fecha_nacimiento, empresa, cargo, direccion, ciudad, pais, observaciones, vip } = req.body;
+      nacionalidad, fecha_nacimiento, empresa, cargo, direccion, ciudad, pais, observaciones, vip, exento_isv } = req.body;
     if (!nombres || !apellidos || !tipo_doc || !numero_doc) {
       return res.status(400).json({ ok: false, error: 'nombres, apellidos, tipo_doc y numero_doc son requeridos' });
     }
     const r = db.prepare(`
       INSERT INTO huespedes (nombres, apellidos, tipo_doc, numero_doc, rtn, email, telefono, telefono2,
-        nacionalidad, fecha_nacimiento, empresa, cargo, direccion, ciudad, pais, observaciones, vip)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        nacionalidad, fecha_nacimiento, empresa, cargo, direccion, ciudad, pais, observaciones, vip, exento_isv)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(nombres, apellidos, tipo_doc, numero_doc, rtn, email, telefono, telefono2,
            nacionalidad || 'Hondureña', fecha_nacimiento, empresa, cargo, direccion, ciudad,
-           pais || 'Honduras', observaciones, vip || 0);
+           pais || 'Honduras', observaciones, vip || 0, exento_isv ? 1 : 0);
     res.status(201).json({ ok: true, data: { id: r.lastInsertRowid } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -58,17 +58,18 @@ router.put('/:id', (req, res) => {
   try {
     const db = getDB();
     const { nombres, apellidos, tipo_doc, numero_doc, rtn, email, telefono, telefono2,
-      nacionalidad, empresa, cargo, direccion, ciudad, observaciones, vip } = req.body;
+      nacionalidad, empresa, cargo, direccion, ciudad, observaciones, vip, exento_isv } = req.body;
     db.prepare(`
       UPDATE huespedes SET nombres=COALESCE(?,nombres), apellidos=COALESCE(?,apellidos),
         tipo_doc=COALESCE(?,tipo_doc), numero_doc=COALESCE(?,numero_doc), rtn=COALESCE(?,rtn),
         email=COALESCE(?,email), telefono=COALESCE(?,telefono), telefono2=COALESCE(?,telefono2),
         nacionalidad=COALESCE(?,nacionalidad), empresa=COALESCE(?,empresa), cargo=COALESCE(?,cargo),
         direccion=COALESCE(?,direccion), ciudad=COALESCE(?,ciudad), observaciones=COALESCE(?,observaciones),
-        vip=COALESCE(?,vip), updated_at=datetime('now','localtime')
+        vip=COALESCE(?,vip), exento_isv=COALESCE(?,exento_isv), updated_at=datetime('now','localtime')
       WHERE id=?
     `).run(nombres,apellidos,tipo_doc,numero_doc,rtn,email,telefono,telefono2,
-           nacionalidad,empresa,cargo,direccion,ciudad,observaciones,vip,req.params.id);
+           nacionalidad,empresa,cargo,direccion,ciudad,observaciones,vip,
+           exento_isv !== undefined ? (exento_isv ? 1 : 0) : null, req.params.id);
     res.json({ ok: true, message: 'Huésped actualizado' });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

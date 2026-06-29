@@ -7,7 +7,7 @@ export default function HuespedesPage() {
   const [huespedes, setHuespedes] = useState([])
   const [busqueda, setBusqueda] = useState('')
   const [showModal, setShowModal] = useState(false)
-  const [form, setForm] = useState({ nombres:'', apellidos:'', tipo_doc:'CEDULA', numero_doc:'', rtn:'', email:'', telefono:'', telefono2:'', nacionalidad:'Hondureña', empresa:'', cargo:'', direccion:'', ciudad:'', pais:'Honduras', observaciones:'' })
+  const [form, setForm] = useState({ nombres:'', apellidos:'', tipo_doc:'CEDULA', numero_doc:'', rtn:'', email:'', telefono:'', telefono2:'', nacionalidad:'Hondureña', empresa:'', cargo:'', direccion:'', ciudad:'', pais:'Honduras', observaciones:'', exento_isv:false })
   const cargar = async () => {
     const r = await api.get('/huespedes', { params: { q: busqueda, limit: 100 } })
     setHuespedes(r.data.data || [])
@@ -44,7 +44,12 @@ export default function HuespedesPage() {
                 <td className="table-cell text-slate-400 text-xs">{h.email}</td>
                 <td className="table-cell text-slate-500 text-xs">{h.empresa}</td>
                 <td className="table-cell text-slate-500 text-xs">{h.nacionalidad}</td>
-                <td className="table-cell">{h.vip ? <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" /> : null}</td>
+                <td className="table-cell">
+                  <div className="flex items-center gap-1.5">
+                    {h.vip ? <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" /> : null}
+                    {h.exento_isv ? <span className="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">Exonerado ISV</span> : null}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -78,6 +83,15 @@ export default function HuespedesPage() {
                 <label className="label">Observaciones</label>
                 <textarea value={form.observaciones} onChange={e => setForm(p=>({...p,observaciones:e.target.value}))} rows={2} className="input-field" />
               </div>
+              <label className="flex items-center gap-3 p-3 bg-slate-900/50 rounded-lg cursor-pointer">
+                <input type="checkbox" checked={form.exento_isv}
+                  onChange={e => setForm(p => ({ ...p, exento_isv: e.target.checked }))}
+                  className="w-4 h-4 rounded" />
+                <div>
+                  <span className="text-sm text-slate-300">Cliente exonerado de ISV</span>
+                  <p className="text-xs text-slate-500">El Impuesto Turístico (4%) se sigue cobrando igual</p>
+                </div>
+              </label>
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Cancelar</button>
                 <button type="submit" className="btn-primary"><Users className="w-4 h-4" /> Registrar</button>

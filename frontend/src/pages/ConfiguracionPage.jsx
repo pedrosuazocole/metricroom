@@ -1,15 +1,19 @@
 // src/pages/ConfiguracionPage.jsx - Configuración general del hotel
 import { useState, useEffect, useRef } from 'react'
-import { Settings, Save, Plus, X, DollarSign, MessageCircle, Building2, FileText, Upload, Trash2, ImageIcon } from 'lucide-react'
+import { Settings, Save, Plus, X, DollarSign, MessageCircle, Building2, FileText, Upload, Trash2, ImageIcon, Mail, BedDouble, Edit2, Power } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
+import MoneyInput from '../components/common/MoneyInput'
 
 const TABS = [
   { id: 'hotel', label: 'Hotel', icon: Building2 },
   { id: 'sar', label: 'SAR / CAI', icon: FileText },
   { id: 'tasa', label: 'Tasa de Cambio', icon: DollarSign },
   { id: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
+  { id: 'email', label: 'Email', icon: Mail },
   { id: 'tarifas', label: 'Tarifas', icon: Settings },
+  { id: 'tipos_habitacion', label: 'Tipos de Habitación', icon: BedDouble },
 ]
 
 export default function ConfiguracionPage() {
@@ -22,6 +26,9 @@ export default function ConfiguracionPage() {
   const [tarifas, setTarifas] = useState([])
   const [showTarifa, setShowTarifa] = useState(false)
   const [tarifaForm, setTarifaForm] = useState({ nombre: '', tipo: 'ESTANDAR', precio: '', descripcion: '' })
+  const [tiposHabitacion, setTiposHabitacion] = useState([])
+  const [showTipoHab, setShowTipoHab] = useState(false)
+  const [tipoHabForm, setTipoHabForm] = useState({ nombre: '', capacidad_sugerida: 2, precio_sugerido: '', precio_10: '', precio_15: '', precio_20: '', descripcion: '' })
   const [loading, setLoading] = useState(true)
   const [logoUploading, setLogoUploading] = useState(false)
   const logoInputRef = useRef()
@@ -29,11 +36,12 @@ export default function ConfiguracionPage() {
   const cargar = async () => {
     setLoading(true)
     try {
-      const [conf, sar, t, hist] = await Promise.all([
+      const [conf, sar, t, hist, tiposHab] = await Promise.all([
         api.get('/configuracion'),
         api.get('/facturas/sar/config').catch(() => ({ data: { data: {} } })),
         api.get('/tasa-cambio/actual').catch(() => ({ data: { data: null } })),
         api.get('/tasa-cambio/historial').catch(() => ({ data: { data: [] } })),
+        api.get('/tipos-habitacion', { params: { incluir_inactivos: true } }).catch(() => ({ data: { data: [] } })),
       ])
       setConfig(conf.data.data || {})
       if (sar.data.data) {
@@ -50,6 +58,7 @@ export default function ConfiguracionPage() {
       }
       setTasaActual(t.data.data)
       setHistorialTasa(hist.data.data || [])
+      setTiposHabitacion(tiposHab.data.data || [])
     } finally { setLoading(false) }
   }
 
@@ -60,6 +69,53 @@ export default function ConfiguracionPage() {
     await api.put('/configuracion', config)
     toast.success('Configuración guardada')
     cargar()
+  }
+
+  // ── Tipos de Habitación ──
+  const abrirNuevoTipoHab = () => {
+    setTipoHabForm({ nombre: '', capacidad_sugerida: 2, precio_sugerido: '', precio_10: '', precio_15: '', precio_20: '', descripcion: '' })
+    setShowTipoHab(true)
+  }
+  const abrirEditarTipoHab = (t) => {
+    setTipoHabForm({
+      id: t.id, nombre: t.nombre, capacidad_sugerida: t.capacidad_sugerida,
+      precio_sugerido: t.precio_sugerido, precio_10: t.precio_10 ?? '', precio_15: t.precio_15 ?? '', precio_20: t.precio_20 ?? '',
+      descripcion: t.descripcion || '',
+    })
+    setShowTipoHab(true)
+  }
+  // Recalcula los 3 descuentos automáticamente cuando cambia el precio Normal,
+  // pero solo si el campo de descuento no fue editado manualmente todavía
+  const handlePrecioNormalChange = (valor) => {
+    const base = parseFloat(valor) || 0
+    setTipoHabForm(p => ({
+      ...p,
+      precio_sugerido: valor,
+      precio_10: p._editado10 ? p.precio_10 : (base ? (base * 0.90).toFixed(2) : ''),
+      precio_15: p._editado15 ? p.precio_15 : (base ? (base * 0.85).toFixed(2) : ''),
+      precio_20: p._editado20 ? p.precio_20 : (base ? (base * 0.80).toFixed(2) : ''),
+    }))
+  }
+  const guardarTipoHab = async (e) => {
+    e.preventDefault()
+    try {
+      if (tipoHabForm.id) {
+        await api.put(`/tipos-habitacion/${tipoHabForm.id}`, tipoHabForm)
+        toast.success('Tipo de habitación actualizado')
+      } else {
+        await api.post('/tipos-habitacion', tipoHabForm)
+        toast.success('Tipo de habitación creado')
+      }
+      setShowTipoHab(false)
+      cargar()
+    } catch { /* toast manejado por interceptor */ }
+  }
+  const toggleTipoHab = async (t) => {
+    try {
+      await api.patch(`/tipos-habitacion/${t.id}/toggle`)
+      toast.success(t.activo ? 'Tipo desactivado' : 'Tipo activado')
+      cargar()
+    } catch { /* toast manejado por interceptor */ }
   }
 
   const guardarSar = async (e) => {
@@ -188,6 +244,43 @@ export default function ConfiguracionPage() {
               <label className="label">Texto de Pie de Factura</label>
               <textarea value={c('factura_pie')} onChange={e => setC('factura_pie', e.target.value)} className="input-field" rows={2} placeholder="Texto que aparece al final de cada factura..." />
             </div>
+          </div>
+
+          {/* Impuestos */}
+          <div className="border-t border-slate-700 pt-4">
+            <h3 className="text-sm font-semibold text-slate-300 mb-3">Impuestos Fiscales (Honduras)</h3>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label">ISV — Impuesto Sobre Ventas (%)</label>
+                <input type="number" step="0.01" value={c('isv_porcentaje') || '15'} onChange={e => setC('isv_porcentaje', e.target.value)} className="input-field" />
+                <p className="text-xs text-slate-600 mt-1">Aplica a hospedaje y otros servicios (restaurante, lavandería, etc.)</p>
+              </div>
+              <div>
+                <label className="label">IHT — Impuesto Turístico (%)</label>
+                <input type="number" step="0.01" value={c('iht_porcentaje') || '4'} onChange={e => setC('iht_porcentaje', e.target.value)} className="input-field" />
+                <p className="text-xs text-slate-600 mt-1">Aplica solo a hospedaje. Se cobra incluso si el cliente está exonerado de ISV.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Horarios */}
+          <div className="border-t border-slate-700 pt-4">
+            <h3 className="text-sm font-semibold text-slate-300 mb-3">Horarios y Recargos</h3>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <div>
+                <label className="label">Hora de Check-In</label>
+                <input type="time" value={c('hora_checkin') || '15:00'} onChange={e => setC('hora_checkin', e.target.value)} className="input-field" />
+              </div>
+              <div>
+                <label className="label">Hora de Check-Out</label>
+                <input type="time" value={c('hora_checkout') || '12:00'} onChange={e => setC('hora_checkout', e.target.value)} className="input-field" />
+              </div>
+              <div>
+                <label className="label">Recargo por Hora Extra (%)</label>
+                <input type="number" step="0.01" value={c('recargo_hora_porcentaje') || '10'} onChange={e => setC('recargo_hora_porcentaje', e.target.value)} className="input-field" />
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mt-2">Este recargo se muestra en la hoja de recepción impresa para informar al huésped.</p>
           </div>
             <div className="sm:col-span-2">
               <label className="label">Logo del Hotel (aparece en facturas)</label>
@@ -375,6 +468,66 @@ export default function ConfiguracionPage() {
         </form>
       )}
 
+      {/* Panel: Email */}
+      {tab === 'email' && (
+        <form onSubmit={guardarConfig} className="card space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-200">Notificaciones por Correo Electrónico</h2>
+            <p className="text-slate-500 text-sm mt-1">Configurá un servidor SMTP para enviar confirmaciones de reserva, check-in y facturas por email.</p>
+          </div>
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-sm space-y-2">
+            <p className="text-blue-300 font-medium">📧 Ejemplo con Gmail:</p>
+            <ul className="text-blue-400/80 space-y-1 list-disc list-inside text-xs">
+              <li>Host: <span className="font-mono bg-blue-500/10 px-1 rounded">smtp.gmail.com</span> · Puerto: <span className="font-mono bg-blue-500/10 px-1 rounded">587</span></li>
+              <li>Usuario: tu correo completo (ej: hotel@gmail.com)</li>
+              <li>Contraseña: necesitás una <strong>contraseña de aplicación</strong> (no la contraseña normal de Gmail)</li>
+            </ul>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Servidor SMTP (Host)</label>
+              <input value={c('smtp_host')} onChange={e => setC('smtp_host', e.target.value)} className="input-field" placeholder="smtp.gmail.com" />
+            </div>
+            <div>
+              <label className="label">Puerto</label>
+              <input value={c('smtp_port') || '587'} onChange={e => setC('smtp_port', e.target.value)} className="input-field" placeholder="587" />
+            </div>
+            <div>
+              <label className="label">Usuario / Correo</label>
+              <input value={c('smtp_user')} onChange={e => setC('smtp_user', e.target.value)} className="input-field" placeholder="hotel@gmail.com" />
+            </div>
+            <div>
+              <label className="label">Contraseña</label>
+              <input type="password" value={c('smtp_pass')} onChange={e => setC('smtp_pass', e.target.value)} className="input-field" placeholder="••••••••" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Correo Remitente (From)</label>
+              <input value={c('smtp_from')} onChange={e => setC('smtp_from', e.target.value)} className="input-field" placeholder="reservas@tuhotel.com" />
+            </div>
+          </div>
+          <div>
+            <label className="label mb-2 block">Activar notificaciones por email para:</label>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {[
+                { key: 'notif_email_reservas', label: '📅 Nueva Reserva' },
+                { key: 'notif_email_checkin', label: '✅ Check-In' },
+                { key: 'notif_email_factura', label: '🧾 Factura Emitida' },
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-3 p-3 bg-slate-700/40 rounded-lg cursor-pointer hover:bg-slate-700/60 transition-colors">
+                  <input type="checkbox" checked={c(key) === '1' || c(key) === true}
+                    onChange={e => setC(key, e.target.checked ? '1' : '0')}
+                    className="w-4 h-4 rounded" />
+                  <span className="text-slate-300 text-sm">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button type="submit" className="btn-primary"><Save className="w-4 h-4" /> Guardar Email</button>
+          </div>
+        </form>
+      )}
+
       {/* Panel: Tarifas */}
       {tab === 'tarifas' && (
         <div className="space-y-4">
@@ -384,19 +537,26 @@ export default function ConfiguracionPage() {
             </button>
           </div>
           <div className="card">
-            <h2 className="text-lg font-semibold text-slate-200 mb-4">Tarifas y Temporadas</h2>
-            <p className="text-slate-500 text-sm mb-4">Las tarifas registradas aquí se usan al crear reservas como referencia de precio sugerido.</p>
+            <h2 className="text-lg font-semibold text-slate-200 mb-1">Tarifas y Temporadas</h2>
+            <p className="text-slate-500 text-sm mb-2">Etiquetas generales de referencia (temporada alta/baja, fin de semana, etc.) — no están ligadas a un tipo de habitación específico.</p>
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2 mb-4 text-xs text-blue-300">
+              💡 ¿Buscás poner el precio de "Sencilla Standard" o crear una tarifa especial para un cliente como Visión Mundial?
+              Eso se hace en <strong>Tipos de Habitación</strong> (pestaña arriba) y en <strong>Clientes Corporativos → botón Tarifas</strong>.
+            </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {(() => {
                 let tarifasArr = []
-                try { tarifasArr = JSON.parse(config.tarifas || '[]') } catch {}
+                try {
+                  const parsed = JSON.parse(config.tarifas || '[]')
+                  tarifasArr = Array.isArray(parsed) ? parsed : []
+                } catch { tarifasArr = [] }
                 return tarifasArr.map((t, i) => (
                   <div key={i} className="bg-slate-700/40 border border-slate-600 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs px-2 py-0.5 rounded-full border border-slate-500 text-slate-400">{t.tipo}</span>
                     </div>
                     <p className="font-medium text-slate-200">{t.nombre}</p>
-                    <p className="text-2xl font-bold text-brand-400 mt-1">L. {parseFloat(t.precio).toFixed(2)}</p>
+                    <p className="text-2xl font-bold text-brand-400 mt-1">L. {(parseFloat(t.precio) || 0).toFixed(2)}</p>
                     {t.descripcion && <p className="text-xs text-slate-500 mt-1">{t.descripcion}</p>}
                   </div>
                 ))
@@ -439,6 +599,131 @@ export default function ConfiguracionPage() {
                   <div className="flex justify-end gap-3">
                     <button type="button" onClick={() => setShowTarifa(false)} className="btn-secondary">Cancelar</button>
                     <button type="submit" className="btn-primary">Guardar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Panel: Tipos de Habitación */}
+      {tab === 'tipos_habitacion' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button onClick={abrirNuevoTipoHab} className="btn-primary">
+              <Plus className="w-4 h-4" /> Nuevo Tipo
+            </button>
+          </div>
+          <div className="card">
+            <h2 className="text-lg font-semibold text-slate-200 mb-1">Catálogo de Tipos de Habitación</h2>
+            <p className="text-slate-500 text-sm mb-4">
+              Estos tipos aparecen en el selector al crear o editar una habitación. Las tarifas de descuento (10/15/20%) se sugieren al elegir el tipo en una reserva — el recepcionista igual puede escribir cualquier otro valor.
+            </p>
+            {tiposHabitacion.length === 0 ? (
+              <div className="text-center py-10 text-slate-600">
+                <BedDouble className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p>No hay tipos de habitación configurados</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-slate-700">
+                      <th className="py-2 pr-3">Tipo</th>
+                      <th className="py-2 px-3">Pax</th>
+                      <th className="py-2 px-3 text-right">Normal</th>
+                      <th className="py-2 px-3 text-right">10%</th>
+                      <th className="py-2 px-3 text-right">15%</th>
+                      <th className="py-2 px-3 text-right">20%</th>
+                      <th className="py-2 px-3 text-center">Estado</th>
+                      <th className="py-2 pl-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tiposHabitacion.map(t => (
+                      <tr key={t.id} className={`border-b border-slate-800 ${!t.activo ? 'opacity-50' : ''}`}>
+                        <td className="py-2.5 pr-3 font-medium text-slate-200">{t.nombre}</td>
+                        <td className="py-2.5 px-3 text-slate-500">{t.capacidad_sugerida}</td>
+                        <td className="py-2.5 px-3 text-right text-brand-400 font-semibold"><PrecioDual monto={t.precio_sugerido} size="sm" /></td>
+                        <td className="py-2.5 px-3 text-right text-slate-300">{t.precio_10 != null ? <PrecioDual monto={t.precio_10} size="xs" /> : '—'}</td>
+                        <td className="py-2.5 px-3 text-right text-slate-300">{t.precio_15 != null ? <PrecioDual monto={t.precio_15} size="xs" /> : '—'}</td>
+                        <td className="py-2.5 px-3 text-right text-slate-300">{t.precio_20 != null ? <PrecioDual monto={t.precio_20} size="xs" /> : '—'}</td>
+                        <td className="py-2.5 px-3 text-center">
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${t.activo ? 'border-emerald-500/30 text-emerald-400' : 'border-slate-600 text-slate-500'}`}>
+                            {t.activo ? 'Activo' : 'Inactivo'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 pl-3">
+                          <div className="flex gap-1 justify-end">
+                            <button onClick={() => abrirEditarTipoHab(t)} className="text-slate-400 hover:text-brand-400 p-1" title="Editar">
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => toggleTipoHab(t)} className="text-slate-400 hover:text-red-400 p-1" title={t.activo ? 'Desactivar' : 'Activar'}>
+                              <Power className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {showTipoHab && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+              <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between p-6 border-b border-slate-700">
+                  <h2 className="text-lg font-semibold text-white">{tipoHabForm.id ? 'Editar Tipo' : 'Nuevo Tipo de Habitación'}</h2>
+                  <button onClick={() => setShowTipoHab(false)}><X className="w-5 h-5 text-slate-500" /></button>
+                </div>
+                <form onSubmit={guardarTipoHab} className="p-6 space-y-4">
+                  <div>
+                    <label className="label">Nombre *</label>
+                    <input value={tipoHabForm.nombre} onChange={e => setTipoHabForm(p => ({ ...p, nombre: e.target.value }))} className="input-field" placeholder="Sencilla Standard, Suite Junior, etc." required autoFocus />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Capacidad Sugerida</label>
+                      <input type="number" min="1" value={tipoHabForm.capacidad_sugerida} onChange={e => setTipoHabForm(p => ({ ...p, capacidad_sugerida: e.target.value }))} className="input-field" />
+                    </div>
+                    <div>
+                      <label className="label">Precio Normal *</label>
+                      <MoneyInput valueHNL={tipoHabForm.precio_sugerido} onChange={val => handlePrecioNormalChange(val)} required />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/50 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Tarifas con Descuento</p>
+                    <p className="text-xs text-slate-600 mb-3">Se calculan automáticamente del precio Normal, pero podés ajustarlas si el descuento real negociado no es exacto.</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="label text-xs">10% off</label>
+                        <MoneyInput valueHNL={tipoHabForm.precio_10}
+                          onChange={val => setTipoHabForm(p => ({ ...p, precio_10: val, _editado10: true }))} />
+                      </div>
+                      <div>
+                        <label className="label text-xs">15% off</label>
+                        <MoneyInput valueHNL={tipoHabForm.precio_15}
+                          onChange={val => setTipoHabForm(p => ({ ...p, precio_15: val, _editado15: true }))} />
+                      </div>
+                      <div>
+                        <label className="label text-xs">20% off</label>
+                        <MoneyInput valueHNL={tipoHabForm.precio_20}
+                          onChange={val => setTipoHabForm(p => ({ ...p, precio_20: val, _editado20: true }))} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="label">Descripción</label>
+                    <input value={tipoHabForm.descripcion} onChange={e => setTipoHabForm(p => ({ ...p, descripcion: e.target.value }))} className="input-field" placeholder="Opcional" />
+                  </div>
+                  <div className="flex justify-end gap-3">
+                    <button type="button" onClick={() => setShowTipoHab(false)} className="btn-secondary">Cancelar</button>
+                    <button type="submit" className="btn-primary"><BedDouble className="w-4 h-4" /> Guardar</button>
                   </div>
                 </form>
               </div>

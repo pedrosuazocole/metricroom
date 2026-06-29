@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import { TrendingDown, Plus, X } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
+import MoneyInput from '../components/common/MoneyInput'
 
 export default function CxPPage() {
   const [cuentas, setCuentas] = useState([])
@@ -55,7 +57,7 @@ export default function CxPPage() {
       <div className="grid grid-cols-2 gap-4">
         <div className="stat-card">
           <p className="text-slate-400 text-sm mb-1">Total Pendiente</p>
-          <p className="text-2xl font-bold text-red-400">L. {totalPendiente.toLocaleString('es-HN', { minimumFractionDigits: 2 })}</p>
+          <p className="text-2xl font-bold text-red-400"><PrecioDual monto={totalPendiente} size="xl" /></p>
         </div>
         <div className="stat-card">
           <p className="text-slate-400 text-sm mb-1">Facturas Pendientes</p>
@@ -90,7 +92,7 @@ export default function CxPPage() {
                     {c.fecha_vencimiento?.split('T')[0]}
                     {vencido && <span className="text-xs block">VENCIDA</span>}
                   </td>
-                  <td className="table-cell font-semibold text-slate-200">L. {parseFloat(c.monto_total).toFixed(2)}</td>
+                  <td className="table-cell font-semibold text-slate-200"><PrecioDual monto={c.monto_total} size="sm" /></td>
                   <td className="table-cell">
                     <span className={`text-xs px-2 py-0.5 rounded-full border ${c.estado === 'PAGADO' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : vencido ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>
                       {c.estado}
@@ -135,8 +137,8 @@ export default function CxPPage() {
                   <input value={form.numero_factura_proveedor} onChange={e => setForm(p => ({ ...p, numero_factura_proveedor: e.target.value }))} className="input-field" />
                 </div>
                 <div>
-                  <label className="label">Monto Total (L.) *</label>
-                  <input type="number" step="0.01" min="0.01" value={form.monto_total} onChange={e => setForm(p => ({ ...p, monto_total: e.target.value }))} className="input-field" required />
+                  <label className="label">Monto Total *</label>
+                  <MoneyInput valueHNL={form.monto_total} onChange={val => setForm(p => ({ ...p, monto_total: val }))} required />
                 </div>
                 <div className="col-span-2">
                   <label className="label">Fecha de Vencimiento *</label>

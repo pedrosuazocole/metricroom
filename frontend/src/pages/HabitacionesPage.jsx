@@ -3,8 +3,9 @@ import { useState, useEffect } from 'react'
 import { BedDouble, Plus, Edit2, X, Check, Wifi, Wind, Tv, Coffee, Car, Bath } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
+import MoneyInput from '../components/common/MoneyInput'
 
-const TIPOS   = ['SENCILLA', 'DOBLE', 'SUITE', 'EJECUTIVA', 'FAMILIAR']
 const ESTADOS = ['DISPONIBLE', 'OCUPADA', 'RESERVADA', 'BLOQUEADA', 'SUCIA', 'RESERVADA_GARANTIZADA']
 const AMENIDADES_OPTS = ['WiFi','Aire Acondicionado','TV Cable','Cafetera','Minibar','Jacuzzi','Bañera','Balcón','Caja Fuerte','Estacionamiento']
 const AMENIDAD_ICONS = { 'WiFi': Wifi, 'Aire Acondicionado': Wind, 'TV Cable': Tv, 'Cafetera': Coffee, 'Estacionamiento': Car, 'Jacuzzi': Bath }
@@ -18,10 +19,11 @@ const ESTADO_COLORS = {
   RESERVADA_GARANTIZADA: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
 }
 
-const FORM_INIT = { numero:'', piso:1, tipo:'SENCILLA', capacidad:2, precio_base:'', precio_corporativo:'', descripcion:'', amenidades:[], activa:1 }
+const FORM_INIT = { numero:'', piso:1, tipo:'', capacidad:2, precio_base:'', precio_corporativo:'', descripcion:'', amenidades:[], activa:1 }
 
 export default function HabitacionesPage() {
   const [habitaciones, setHabitaciones] = useState([])
+  const [tiposHabitacion, setTiposHabitacion] = useState([])
   const [loading, setLoading]           = useState(true)
   const [showModal, setShowModal]       = useState(false)
   const [showEstado, setShowEstado]     = useState(false)
@@ -34,13 +36,20 @@ export default function HabitacionesPage() {
 
   const cargar = async () => {
     setLoading(true)
-    try { const r = await api.get('/habitaciones'); setHabitaciones(r.data.data || []) }
-    finally { setLoading(false) }
+    try {
+      const [r, tipos] = await Promise.all([
+        api.get('/habitaciones'),
+        api.get('/tipos-habitacion'),
+      ])
+      setHabitaciones(r.data.data || [])
+      setTiposHabitacion(tipos.data.data || [])
+    } finally { setLoading(false) }
   }
 
   useEffect(() => { cargar() }, [])
 
   const pisos = [...new Set(habitaciones.map(h => h.piso))].sort()
+  const tiposEnUso = [...new Set(habitaciones.map(h => h.tipo))].sort()
 
   const filtradas = habitaciones.filter(h => {
     if (filtroTipo   && h.tipo   !== filtroTipo)              return false
@@ -52,7 +61,10 @@ export default function HabitacionesPage() {
   const abrirNueva  = () => { setForm(FORM_INIT); setShowModal(true) }
   const abrirEditar = (h) => {
     let amenArr = []
-    try { amenArr = JSON.parse(h.amenidades || '[]') } catch {}
+    try {
+      const parsed = JSON.parse(h.amenidades || '[]')
+      amenArr = Array.isArray(parsed) ? parsed : []
+    } catch { amenArr = [] }
     setForm({ ...h, amenidades: amenArr })
     setShowModal(true)
   }
@@ -62,7 +74,7 @@ export default function HabitacionesPage() {
     if (!form.numero || !form.precio_base) return toast.error('Número y precio base son requeridos')
     const payload = {
       ...form,
-      amenidades: JSON.stringify(form.amenidades),
+      amenidades: Array.isArray(form.amenidades) ? form.amenidades : [],
       piso: parseInt(form.piso), capacidad: parseInt(form.capacidad),
       precio_base: parseFloat(form.precio_base),
       precio_corporativo: form.precio_corporativo ? parseFloat(form.precio_corporativo) : null,
@@ -120,7 +132,7 @@ export default function HabitacionesPage() {
         </select>
         <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)} className="input-field w-auto">
           <option value="">Todos los tipos</option>
-          {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+          {tiposEnUso.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} className="input-field w-auto">
           <option value="">Todos los estados</option>
@@ -143,24 +155,29 @@ export default function HabitacionesPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filtradas.map(h => {
             let amenArr = []
-            try { amenArr = JSON.parse(h.amenidades || '[]') } catch {}
+            try {
+              const parsed = JSON.parse(h.amenidades || '[]')
+              amenArr = Array.isArray(parsed) ? parsed : []
+            } catch { amenArr = [] }
             return (
               <div key={h.id} className={`card relative overflow-hidden transition-all hover:border-slate-600 ${!h.activa ? 'opacity-50' : ''}`}>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium absolute top-3 right-3 ${ESTADO_COLORS[h.estado]}`}>
-                  {h.estado.replace(/_/g,' ')}
+                <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium absolute top-3 right-3 ${ESTADO_COLORS[h.estado] || 'bg-slate-500/20 text-slate-400 border-slate-500/30'}`}>
+                  {(h.estado || 'SIN ESTADO').replace(/_/g,' ')}
                 </span>
                 <div className="mb-3">
                   <p className="text-3xl font-black text-brand-400">{h.numero}</p>
-                  <p className="text-xs text-slate-500">Piso {h.piso} · {h.tipo}</p>
+                  <p className="text-xs text-slate-500">Piso {h.piso} · {h.tipo || 'Sin tipo'}</p>
                 </div>
                 <div className="space-y-1 text-xs text-slate-400 mb-3">
                   <div className="flex justify-between"><span>Capacidad</span><span className="text-slate-300">{h.capacidad} pax</span></div>
                   <div className="flex justify-between">
                     <span>Precio</span>
-                    <span className="text-emerald-400 font-semibold">L. {parseFloat(h.precio_base).toLocaleString('es-HN')}</span>
+                    <span className="text-emerald-400 font-semibold">
+                      <PrecioDual monto={parseFloat(h.precio_base) || 0} size="xs" />
+                    </span>
                   </div>
                   {h.precio_corporativo && (
-                    <div className="flex justify-between"><span>Corp.</span><span className="text-brand-400">L. {parseFloat(h.precio_corporativo).toLocaleString('es-HN')}</span></div>
+                    <div className="flex justify-between"><span>Corp.</span><span className="text-brand-400"><PrecioDual monto={parseFloat(h.precio_corporativo) || 0} size="xs" /></span></div>
                   )}
                 </div>
                 {amenArr.length > 0 && (
@@ -210,10 +227,25 @@ export default function HabitacionesPage() {
                     onChange={e => setForm(p=>({...p,piso:e.target.value}))} className="input-field" />
                 </div>
                 <div>
-                  <label className="label">Tipo</label>
-                  <select value={form.tipo} onChange={e => setForm(p=>({...p,tipo:e.target.value}))} className="input-field">
-                    {TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+                  <label className="label">Tipo *</label>
+                  <select value={form.tipo} onChange={e => {
+                      const tipoElegido = tiposHabitacion.find(t => t.nombre === e.target.value)
+                      setForm(p => ({
+                        ...p,
+                        tipo: e.target.value,
+                        // Solo autocompletar si el campo está vacío (no pisar valores ya puestos al editar)
+                        capacidad: p.capacidad || tipoElegido?.capacidad_sugerida || 2,
+                        precio_base: p.precio_base || tipoElegido?.precio_sugerido || '',
+                      }))
+                    }} className="input-field" required>
+                    <option value="">Seleccionar tipo...</option>
+                    {tiposHabitacion.map(t => (
+                      <option key={t.id} value={t.nombre}>{t.nombre} — L. {(parseFloat(t.precio_sugerido) || 0).toFixed(0)}/noche</option>
+                    ))}
                   </select>
+                  {tiposHabitacion.length === 0 && (
+                    <p className="text-xs text-yellow-500 mt-1">No hay tipos configurados. Creálos en Configuración → Tipos de Habitación.</p>
+                  )}
                 </div>
                 <div>
                   <label className="label">Capacidad</label>
@@ -223,14 +255,21 @@ export default function HabitacionesPage() {
               </div>
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="label">Precio Base / Noche (L.) *</label>
-                  <input type="number" step="0.01" min="0" value={form.precio_base}
-                    onChange={e => setForm(p=>({...p,precio_base:e.target.value}))} className="input-field" placeholder="800.00" required />
+                  <label className="label">Precio Base / Noche *</label>
+                  <MoneyInput
+                    valueHNL={form.precio_base}
+                    onChange={val => setForm(p => ({ ...p, precio_base: val }))}
+                    placeholder="800.00"
+                    required
+                  />
                 </div>
                 <div>
-                  <label className="label">Precio Corporativo (L.)</label>
-                  <input type="number" step="0.01" min="0" value={form.precio_corporativo||''}
-                    onChange={e => setForm(p=>({...p,precio_corporativo:e.target.value}))} className="input-field" placeholder="Opcional" />
+                  <label className="label">Precio Corporativo</label>
+                  <MoneyInput
+                    valueHNL={form.precio_corporativo || ''}
+                    onChange={val => setForm(p => ({ ...p, precio_corporativo: val }))}
+                    placeholder="Opcional"
+                  />
                 </div>
               </div>
               <div>

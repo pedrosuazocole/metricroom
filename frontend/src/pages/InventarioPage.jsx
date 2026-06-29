@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import { Package, Plus, ArrowDown, ArrowUp, AlertTriangle, X, RefreshCw } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
+import MoneyInput from '../components/common/MoneyInput'
 
 const CATEGORIAS = ['AMENIDADES', 'ROPA_CAMA', 'ALIMENTOS', 'BEBIDAS', 'LIMPIEZA', 'MANTENIMIENTO', 'OTROS']
 const TIPOS_MOV = ['ENTRADA', 'SALIDA', 'AJUSTE']
@@ -129,7 +131,7 @@ export default function InventarioPage() {
                       <span className="text-slate-500 text-xs ml-1">{item.unidad_medida}</span>
                     </td>
                     <td className="table-cell text-slate-500 text-sm">{item.stock_minimo}</td>
-                    <td className="table-cell text-slate-300 text-sm">L. {parseFloat(item.precio_unitario || 0).toFixed(2)}</td>
+                    <td className="table-cell text-slate-300 text-sm"><PrecioDual monto={item.precio_unitario || 0} size="xs" /></td>
                     <td className="table-cell">
                       {alerta ? (
                         <span className="badge-danger flex items-center gap-1 w-fit">
@@ -241,8 +243,8 @@ export default function InventarioPage() {
                   <input type="number" min="0" value={form.stock_minimo} onChange={e => setForm(p => ({ ...p, stock_minimo: e.target.value }))} className="input-field" />
                 </div>
                 <div className="col-span-2">
-                  <label className="label">Precio Unitario (L.)</label>
-                  <input type="number" step="0.01" min="0" value={form.precio_unitario} onChange={e => setForm(p => ({ ...p, precio_unitario: e.target.value }))} className="input-field" />
+                  <label className="label">Precio Unitario</label>
+                  <MoneyInput valueHNL={form.precio_unitario} onChange={val => setForm(p => ({ ...p, precio_unitario: val }))} />
                 </div>
               </div>
               <div className="flex justify-end gap-3">
@@ -276,8 +278,8 @@ export default function InventarioPage() {
                   <input type="number" min="1" value={movForm.cantidad} onChange={e => setMovForm(p => ({ ...p, cantidad: e.target.value }))} className="input-field" required />
                 </div>
                 <div>
-                  <label className="label">Precio Unit. (L.)</label>
-                  <input type="number" step="0.01" value={movForm.precio_unitario} onChange={e => setMovForm(p => ({ ...p, precio_unitario: e.target.value }))} className="input-field" />
+                  <label className="label">Precio Unit.</label>
+                  <MoneyInput valueHNL={movForm.precio_unitario} onChange={val => setMovForm(p => ({ ...p, precio_unitario: val }))} />
                 </div>
               </div>
               <div>

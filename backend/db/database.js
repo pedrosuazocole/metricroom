@@ -39,7 +39,7 @@ function initSchema() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       numero TEXT NOT NULL UNIQUE,
       piso INTEGER NOT NULL DEFAULT 1,
-      tipo TEXT NOT NULL CHECK(tipo IN ('SENCILLA','DOBLE','SUITE','EJECUTIVA','FAMILIAR')),
+      tipo TEXT NOT NULL,
       capacidad INTEGER NOT NULL DEFAULT 2,
       estado TEXT NOT NULL DEFAULT 'DISPONIBLE' 
         CHECK(estado IN ('DISPONIBLE','OCUPADA','RESERVADA','BLOQUEADA','SUCIA','RESERVADA_GARANTIZADA')),
@@ -48,8 +48,43 @@ function initSchema() {
       descripcion TEXT,
       amenidades TEXT, -- JSON array
       activa INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
-      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    -- =============================================
+    -- TABLA: tipos_habitacion (catálogo configurable)
+    -- =============================================
+    CREATE TABLE IF NOT EXISTS tipos_habitacion (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL UNIQUE,
+      capacidad_sugerida INTEGER NOT NULL DEFAULT 2,
+      precio_sugerido REAL NOT NULL DEFAULT 0,
+      -- Tarifas con descuento. Se calculan automáticamente desde precio_sugerido
+      -- pero quedan como columnas editables porque el descuento real no siempre
+      -- es un porcentaje exacto (ej: 1,757.48 no es exactamente 10% de 1,952.75)
+      precio_10 REAL,
+      precio_15 REAL,
+      precio_20 REAL,
+      descripcion TEXT,
+      activo INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    -- =============================================
+    -- TABLA: tarifas_cliente_corporativo
+    -- Tarifa especial negociada de un cliente corporativo, por tipo de habitación
+    -- (ej: "Visión Mundial" paga L.1,875.00 en Sencilla Std en vez de la tarifa normal)
+    -- =============================================
+    CREATE TABLE IF NOT EXISTS tarifas_cliente_corporativo (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cliente_corporativo_id INTEGER NOT NULL,
+      tipo_habitacion_id INTEGER NOT NULL,
+      precio REAL NOT NULL,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY (cliente_corporativo_id) REFERENCES clientes_corporativos(id),
+      FOREIGN KEY (tipo_habitacion_id) REFERENCES tipos_habitacion(id),
+      UNIQUE(cliente_corporativo_id, tipo_habitacion_id)
     );
 
     -- =============================================
@@ -74,8 +109,10 @@ function initSchema() {
       pais TEXT DEFAULT 'Honduras',
       observaciones TEXT,
       vip INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
-      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      exento_isv INTEGER DEFAULT 0,
+      registro_exonerado TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -97,6 +134,7 @@ function initSchema() {
       monto_deposito REAL DEFAULT 0,
       motivo_visita TEXT CHECK(motivo_visita IN ('TURISMO','NEGOCIOS','EVENTOS','FAMILIAR','OTRO')),
       empresa TEXT,
+      cliente_corporativo_id INTEGER,
       tarifa_aplicada REAL NOT NULL,
       moneda TEXT DEFAULT 'HNL' CHECK(moneda IN ('HNL','USD')),
       tasa_cambio REAL DEFAULT 1,
@@ -104,8 +142,8 @@ function initSchema() {
       notas TEXT,
       origen TEXT DEFAULT 'MOSTRADOR' CHECK(origen IN ('MOSTRADOR','ONLINE','TELEFONO','AGENCIA','CORPORATIVO')),
       created_by TEXT,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
-      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      updated_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
       FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
     );
@@ -124,7 +162,7 @@ function initSchema() {
       estado TEXT DEFAULT 'ACTIVO' CHECK(estado IN ('ACTIVO','CHECKOUT','CANCELADO')),
       observaciones TEXT,
       atendido_por TEXT,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      created_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (reserva_id) REFERENCES reservas(id),
       FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
       FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
@@ -142,7 +180,7 @@ function initSchema() {
       subtotal REAL NOT NULL,
       categoria TEXT DEFAULT 'SERVICIO' 
         CHECK(categoria IN ('MINIBAR','RESTAURANTE','LAVANDERIA','TELEFONO','TRANSPORTE','OTROS','SERVICIO')),
-      fecha TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      fecha TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (checkin_id) REFERENCES checkins(id)
     );
 
@@ -160,7 +198,7 @@ function initSchema() {
       punto_emision TEXT DEFAULT '001',
       tipo_documento TEXT DEFAULT '01',
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -191,7 +229,7 @@ function initSchema() {
       impresa INTEGER DEFAULT 0,
       enviada_email INTEGER DEFAULT 0,
       created_by TEXT,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      created_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (checkin_id) REFERENCES checkins(id),
       FOREIGN KEY (huesped_id) REFERENCES huespedes(id)
     );
@@ -205,7 +243,8 @@ function initSchema() {
       descripcion TEXT NOT NULL,
       cantidad REAL DEFAULT 1,
       precio_unitario REAL NOT NULL,
-      tipo_impuesto TEXT DEFAULT 'ISV' CHECK(tipo_impuesto IN ('ISV','IHT','EXENTO')),
+      aplica_isv INTEGER DEFAULT 0,
+      aplica_iht INTEGER DEFAULT 0,
       subtotal REAL NOT NULL,
       FOREIGN KEY (factura_id) REFERENCES facturas(id)
     );
@@ -216,9 +255,10 @@ function initSchema() {
     CREATE TABLE IF NOT EXISTS tasa_cambio (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fecha TEXT NOT NULL,
-      usd_a_hnl REAL NOT NULL,
-      fuente TEXT DEFAULT 'MANUAL',
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      tasa_compra REAL NOT NULL,
+      tasa_venta REAL NOT NULL,
+      observaciones TEXT,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -237,7 +277,7 @@ function initSchema() {
       dias_credito INTEGER DEFAULT 30,
       descuento_habitaciones REAL DEFAULT 0,
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -255,7 +295,7 @@ function initSchema() {
       condiciones_pago TEXT,
       dias_credito INTEGER DEFAULT 0,
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -269,7 +309,7 @@ function initSchema() {
       saldo_pendiente REAL NOT NULL,
       fecha_vencimiento TEXT,
       estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE','PARCIAL','PAGADA','VENCIDA')),
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      created_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (factura_id) REFERENCES facturas(id),
       FOREIGN KEY (cliente_id) REFERENCES clientes_corporativos(id)
     );
@@ -286,7 +326,7 @@ function initSchema() {
       saldo_pendiente REAL NOT NULL,
       fecha_vencimiento TEXT,
       estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE','PARCIAL','PAGADA','VENCIDA')),
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      created_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
     );
 
@@ -305,7 +345,7 @@ function initSchema() {
       proveedor_id INTEGER,
       ubicacion TEXT,
       activo INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      created_at TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
     );
 
@@ -320,7 +360,7 @@ function initSchema() {
       motivo TEXT,
       referencia TEXT,
       usuario TEXT,
-      fecha TEXT DEFAULT (datetime(\'now\',\'localtime\')),
+      fecha TEXT DEFAULT (datetime('now','localtime')),
       FOREIGN KEY (inventario_id) REFERENCES inventario(id)
     );
 
@@ -342,7 +382,7 @@ function initSchema() {
       aplica_viernes INTEGER DEFAULT 1,
       aplica_sabado INTEGER DEFAULT 1,
       activa INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -356,7 +396,7 @@ function initSchema() {
       canal TEXT DEFAULT 'WHATSAPP',
       estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE','ENVIADO','ERROR')),
       respuesta TEXT,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -367,7 +407,7 @@ function initSchema() {
       clave TEXT NOT NULL UNIQUE,
       valor TEXT,
       descripcion TEXT,
-      updated_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      updated_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -382,7 +422,7 @@ function initSchema() {
       email TEXT,
       activo INTEGER DEFAULT 1,
       last_login TEXT,
-      created_at TEXT DEFAULT (datetime(\'now\',\'localtime\'))
+      created_at TEXT DEFAULT (datetime('now','localtime'))
     );
 
     -- =============================================
@@ -404,8 +444,334 @@ function initSchema() {
     );
   `);
 
+  // Migrar tablas con esquema viejo (de versiones anteriores ya desplegadas)
+  // Envuelto en try/catch: si una migración puntual falla, no debe tumbar
+  // todo el arranque del servidor — el resto del sistema sigue funcionando
+  // y el problema se puede diagnosticar/reparar vía /api/diag y /api/repair-*.
+  try {
+    migrarEsquemaViejo();
+  } catch (err) {
+    console.error('⚠️  Error durante migrarEsquemaViejo():', err.message);
+    console.error('   El servidor continúa arrancando. Usá /api/diag para revisar el estado.');
+  }
+
   // Insertar datos iniciales si no existen
   seedInitialData();
+}
+
+function columnaExiste(db, tabla, columna) {
+  const cols = db.prepare(`PRAGMA table_info(${tabla})`).all();
+  return cols.some(c => c.name === columna);
+}
+
+function migrarEsquemaViejo() {
+  // Usa la variable de módulo `db` (la instancia ya está abierta en initSchema)
+  // Cada migración corre en su propio try/catch: si una falla, las demás
+  // igual se ejecutan y el problema queda aislado a esa tabla puntual.
+
+  // ── Migración: tasa_cambio (usd_a_hnl -> tasa_compra + tasa_venta) ──
+  try {
+    if (columnaExiste(db, 'tasa_cambio', 'usd_a_hnl') && !columnaExiste(db, 'tasa_cambio', 'tasa_compra')) {
+      console.log('🔧 Migrando tabla tasa_cambio al esquema nuevo...');
+      db.exec(`
+        ALTER TABLE tasa_cambio RENAME TO tasa_cambio_old;
+        CREATE TABLE tasa_cambio (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          fecha TEXT NOT NULL,
+          tasa_compra REAL NOT NULL,
+          tasa_venta REAL NOT NULL,
+          observaciones TEXT,
+          created_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+      `);
+      // Migrar datos viejos: usábamos un solo valor (usd_a_hnl) para ambos campos
+      const viejos = db.prepare('SELECT * FROM tasa_cambio_old').all();
+      const insertar = db.prepare(`
+        INSERT INTO tasa_cambio (fecha, tasa_compra, tasa_venta, observaciones, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      viejos.forEach(v => {
+        insertar.run(v.fecha, v.usd_a_hnl, v.usd_a_hnl, v.fuente || null, v.created_at);
+      });
+      db.exec('DROP TABLE tasa_cambio_old;');
+      console.log(`✅ Migradas ${viejos.length} tasa(s) de cambio al esquema nuevo`);
+    }
+  } catch (err) {
+    console.error('⚠️  Migración tasa_cambio falló:', err.message);
+  }
+
+  // ── Migración: detalle_facturas (tipo_impuesto -> aplica_isv + aplica_iht) ──
+  try {
+    if (columnaExiste(db, 'detalle_facturas', 'tipo_impuesto') && !columnaExiste(db, 'detalle_facturas', 'aplica_isv')) {
+      console.log('🔧 Migrando tabla detalle_facturas al esquema nuevo...');
+      db.exec(`ALTER TABLE detalle_facturas ADD COLUMN aplica_isv INTEGER DEFAULT 0;`);
+      db.exec(`ALTER TABLE detalle_facturas ADD COLUMN aplica_iht INTEGER DEFAULT 0;`);
+      db.exec(`UPDATE detalle_facturas SET aplica_isv = 1 WHERE tipo_impuesto = 'ISV';`);
+      db.exec(`UPDATE detalle_facturas SET aplica_iht = 1 WHERE tipo_impuesto = 'IHT';`);
+      console.log('✅ detalle_facturas migrada');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración detalle_facturas falló:', err.message);
+  }
+
+  // ── Migración: huespedes (agregar exento_isv si falta) ──
+  try {
+    if (!columnaExiste(db, 'huespedes', 'exento_isv')) {
+      console.log('🔧 Agregando columna exento_isv a huespedes...');
+      db.exec(`ALTER TABLE huespedes ADD COLUMN exento_isv INTEGER DEFAULT 0;`);
+    }
+  } catch (err) {
+    console.error('⚠️  Migración huespedes.exento_isv falló:', err.message);
+  }
+
+  // ── Migración: tipos_habitacion (agregar columnas de descuento si faltan) ──
+  try {
+    if (columnaExiste(db, 'tipos_habitacion', 'precio_sugerido') && !columnaExiste(db, 'tipos_habitacion', 'precio_10')) {
+      console.log('🔧 Agregando columnas de tarifa con descuento a tipos_habitacion...');
+      db.exec(`ALTER TABLE tipos_habitacion ADD COLUMN precio_10 REAL;`);
+      db.exec(`ALTER TABLE tipos_habitacion ADD COLUMN precio_15 REAL;`);
+      db.exec(`ALTER TABLE tipos_habitacion ADD COLUMN precio_20 REAL;`);
+      // Calcular automáticamente los descuentos para los tipos ya existentes
+      db.exec(`
+        UPDATE tipos_habitacion
+        SET precio_10 = ROUND(precio_sugerido * 0.90, 2),
+            precio_15 = ROUND(precio_sugerido * 0.85, 2),
+            precio_20 = ROUND(precio_sugerido * 0.80, 2)
+        WHERE precio_10 IS NULL;
+      `);
+      console.log('✅ tipos_habitacion migrada con descuentos calculados');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración tipos_habitacion falló:', err.message);
+  }
+
+  // ── Migración: reservas (agregar cliente_corporativo_id si falta) ──
+  try {
+    if (!columnaExiste(db, 'reservas', 'cliente_corporativo_id')) {
+      console.log('🔧 Agregando columna cliente_corporativo_id a reservas...');
+      db.exec(`ALTER TABLE reservas ADD COLUMN cliente_corporativo_id INTEGER;`);
+    }
+  } catch (err) {
+    console.error('⚠️  Migración reservas.cliente_corporativo_id falló:', err.message);
+  }
+
+  // ── Migración: FK fosilizada a habitaciones_old en reservas/checkins ──
+  // Cuando la tabla "habitaciones" se renombró temporalmente a "habitaciones_old"
+  // durante una migración anterior, SQLite NO actualiza automáticamente las
+  // FOREIGN KEY de otras tablas que ya referenciaban "habitaciones" — la
+  // definición SQL de "reservas"/"checkins" puede haber quedado fosilizada
+  // apuntando literalmente a "habitaciones_old", aunque esa tabla ya no exista.
+  // Esto se reconstruye igual que con habitaciones: RENAME + CREATE + INSERT + DROP.
+  //
+  // Cada tabla se repara en su propio try/catch, y antes de intentar el RENAME
+  // se limpia cualquier "<tabla>_fix_old" residual de un intento anterior
+  // interrumpido — el mismo patrón defensivo que ya usamos para habitaciones.
+  const tablaExisteGenerico = (nombre) =>
+    !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(nombre);
+
+  // Usar PRAGMA foreign_key_list (parser nativo de SQLite) en vez de regex
+  // sobre el texto del SQL — es 100% confiable sin importar formato/espacios.
+  const fkFosilizada = (tabla) => {
+    if (!tablaExisteGenerico(tabla)) return false;
+    const fks = db.prepare(`PRAGMA foreign_key_list(${tabla})`).all();
+    return fks.some(fk => fk.table === 'habitaciones_old');
+  };
+
+  try {
+    // 3 estados posibles para "reservas" / "reservas_fix_old":
+    //  1) reservas existe y SIN FK fosilizada, sin residuo -> nada que hacer
+    //  2) reservas existe y SIN FK fosilizada, CON residuo  -> ya migró antes,
+    //     solo limpiar el residuo huérfano
+    //  3) reservas existe CON FK fosilizada                -> reconstruir
+    //  4) reservas NO existe pero reservas_fix_old SÍ       -> la migración se
+    //     interrumpió justo después del RENAME, antes del CREATE. Hay que
+    //     COMPLETAR el proceso (crear tabla nueva + copiar datos + dropear
+    //     la vieja) — NUNCA solo borrar, o se pierden reservas reales.
+    const reservasExiste = tablaExisteGenerico('reservas');
+    const reservasOldExiste = tablaExisteGenerico('reservas_fix_old');
+
+    if (reservasExiste && !fkFosilizada('reservas') && reservasOldExiste) {
+      // Caso 2: ya migró exitosamente antes, solo quedó el residuo por limpiar
+      console.log('🧹 Limpiando reservas_fix_old residual (la migración ya había completado)...');
+      db.exec('DROP TABLE reservas_fix_old;');
+    }
+
+    if ((reservasExiste && fkFosilizada('reservas')) || (!reservasExiste && reservasOldExiste)) {
+      // Caso 3 o Caso 4: hay que (re)construir la tabla nueva
+      console.log('🔧 Reconstruyendo tabla reservas (FK fosilizada o migración interrumpida a medias)...');
+
+      const migrar = db.transaction(() => {
+        // Si "reservas" todavía existe (Caso 3), renombrarla primero.
+        // Si no existe (Caso 4), ya está renombrada de un intento anterior.
+        if (reservasExiste) {
+          db.exec('ALTER TABLE reservas RENAME TO reservas_fix_old;');
+        }
+        db.exec(`
+          CREATE TABLE reservas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT NOT NULL UNIQUE,
+            huesped_id INTEGER NOT NULL,
+            habitacion_id INTEGER NOT NULL,
+            fecha_entrada TEXT NOT NULL,
+            fecha_salida TEXT NOT NULL,
+            noches INTEGER NOT NULL,
+            adultos INTEGER DEFAULT 1,
+            ninos INTEGER DEFAULT 0,
+            estado TEXT NOT NULL DEFAULT 'PENDIENTE'
+              CHECK(estado IN ('PENDIENTE','CONFIRMADA','GARANTIZADA','CHECKIN','CHECKOUT','CANCELADA','NO_SHOW')),
+            tipo_garantia TEXT CHECK(tipo_garantia IN ('EFECTIVO','TARJETA','TRANSFERENCIA','CREDITO_EMPRESA','VOUCHER')),
+            monto_deposito REAL DEFAULT 0,
+            motivo_visita TEXT CHECK(motivo_visita IN ('TURISMO','NEGOCIOS','EVENTOS','FAMILIAR','OTRO')),
+            empresa TEXT,
+            cliente_corporativo_id INTEGER,
+            tarifa_aplicada REAL NOT NULL,
+            moneda TEXT DEFAULT 'HNL' CHECK(moneda IN ('HNL','USD')),
+            tasa_cambio REAL DEFAULT 1,
+            total_estimado REAL,
+            notas TEXT,
+            origen TEXT DEFAULT 'MOSTRADOR' CHECK(origen IN ('MOSTRADOR','ONLINE','TELEFONO','AGENCIA','CORPORATIVO')),
+            created_by TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            updated_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
+            FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
+          );
+        `);
+        // Insertar solo las columnas que existían en la tabla vieja (por si difiere)
+        const colsViejas = db.prepare('PRAGMA table_info(reservas_fix_old)').all().map(c => c.name);
+        const colsComunes = colsViejas.filter(c =>
+          ['id','codigo','huesped_id','habitacion_id','fecha_entrada','fecha_salida','noches',
+           'adultos','ninos','estado','tipo_garantia','monto_deposito','motivo_visita','empresa',
+           'cliente_corporativo_id','tarifa_aplicada','moneda','tasa_cambio','total_estimado',
+           'notas','origen','created_by','created_at','updated_at'].includes(c)
+        ).join(', ');
+        db.exec(`INSERT INTO reservas (${colsComunes}) SELECT ${colsComunes} FROM reservas_fix_old;`);
+        db.exec('DROP TABLE reservas_fix_old;');
+      });
+      migrar();
+      console.log('✅ Tabla reservas reconstruida con FK correcta — datos preservados');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración FK fosilizada (reservas) falló:', err.message);
+  }
+
+  // checkins se repara en su PROPIO try/catch — mismo patrón de 4 casos que reservas.
+  try {
+    const checkinsExiste = tablaExisteGenerico('checkins');
+    const checkinsOldExiste = tablaExisteGenerico('checkins_fix_old');
+
+    if (checkinsExiste && !fkFosilizada('checkins') && checkinsOldExiste) {
+      console.log('🧹 Limpiando checkins_fix_old residual (la migración ya había completado)...');
+      db.exec('DROP TABLE checkins_fix_old;');
+    }
+
+    if ((checkinsExiste && fkFosilizada('checkins')) || (!checkinsExiste && checkinsOldExiste)) {
+      console.log('🔧 Reconstruyendo tabla checkins (FK fosilizada o migración interrumpida a medias)...');
+
+      const migrar = db.transaction(() => {
+        if (checkinsExiste) {
+          db.exec('ALTER TABLE checkins RENAME TO checkins_fix_old;');
+        }
+        db.exec(`
+          CREATE TABLE checkins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reserva_id INTEGER NOT NULL,
+            huesped_id INTEGER NOT NULL,
+            habitacion_id INTEGER NOT NULL,
+            fecha_checkin TEXT NOT NULL,
+            fecha_checkout_real TEXT,
+            fecha_checkout_prevista TEXT NOT NULL,
+            estado TEXT DEFAULT 'ACTIVO' CHECK(estado IN ('ACTIVO','CHECKOUT','CANCELADO')),
+            observaciones TEXT,
+            atendido_por TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (reserva_id) REFERENCES reservas(id),
+            FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
+            FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
+          );
+        `);
+        const colsViejas = db.prepare('PRAGMA table_info(checkins_fix_old)').all().map(c => c.name);
+        const colsComunes = colsViejas.filter(c =>
+          ['id','reserva_id','huesped_id','habitacion_id','fecha_checkin','fecha_checkout_real',
+           'fecha_checkout_prevista','estado','observaciones','atendido_por','created_at'].includes(c)
+        ).join(', ');
+        db.exec(`INSERT INTO checkins (${colsComunes}) SELECT ${colsComunes} FROM checkins_fix_old;`);
+        db.exec('DROP TABLE checkins_fix_old;');
+      });
+      migrar();
+      console.log('✅ Tabla checkins reconstruida con FK correcta — datos preservados');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración FK fosilizada (checkins) falló:', err.message);
+  }
+
+  // ── Migración: habitaciones (quitar CHECK viejo de tipo fijo) ──
+  // SQLite no permite ALTER para quitar un CHECK constraint, así que se reconstruye
+  // la tabla completa preservando todos los datos existentes.
+  try {
+  const tablaExiste = (nombre) =>
+    !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(nombre);
+
+  const habitacionesTieneCheckViejo = (() => {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='habitaciones'").get();
+    return row && /CHECK\s*\(\s*tipo\s+IN/i.test(row.sql);
+  })();
+
+  // Caso A: una corrida anterior se interrumpió a mitad de la migración y dejó
+  // "habitaciones_old" huérfana (la tabla "habitaciones" ya quedó migrada, pero
+  // el DROP final nunca se ejecutó). Si "habitaciones" ya está bien, solo limpiar.
+  if (!habitacionesTieneCheckViejo && tablaExiste('habitaciones_old')) {
+    console.log('🧹 Limpiando tabla residual habitaciones_old de una migración interrumpida...');
+    db.exec('DROP TABLE habitaciones_old;');
+  }
+
+  // Caso B: la migración nunca llegó a completarse y "habitaciones" sigue con
+  // el CHECK viejo. Reconstruir de forma atómica (todo o nada) usando una
+  // transacción real, para que un corte a mitad de camino no deje basura.
+  if (habitacionesTieneCheckViejo) {
+    console.log('🔧 Migrando tabla habitaciones para permitir tipos personalizados...');
+
+    // Si ya existe una habitaciones_old residual de un intento previo fallido,
+    // borrarla primero para que el RENAME no choque.
+    if (tablaExiste('habitaciones_old')) {
+      db.exec('DROP TABLE habitaciones_old;');
+    }
+
+    const migrar = db.transaction(() => {
+      db.exec('ALTER TABLE habitaciones RENAME TO habitaciones_old;');
+      db.exec(`
+        CREATE TABLE habitaciones (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          numero TEXT NOT NULL UNIQUE,
+          piso INTEGER NOT NULL DEFAULT 1,
+          tipo TEXT NOT NULL,
+          capacidad INTEGER NOT NULL DEFAULT 2,
+          estado TEXT NOT NULL DEFAULT 'DISPONIBLE'
+            CHECK(estado IN ('DISPONIBLE','OCUPADA','RESERVADA','BLOQUEADA','SUCIA','RESERVADA_GARANTIZADA')),
+          precio_base REAL NOT NULL DEFAULT 0,
+          precio_corporativo REAL,
+          descripcion TEXT,
+          amenidades TEXT,
+          activa INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT DEFAULT (datetime('now','localtime')),
+          updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+      `);
+      db.exec(`
+        INSERT INTO habitaciones (id, numero, piso, tipo, capacidad, estado, precio_base, precio_corporativo, descripcion, amenidades, activa, created_at, updated_at)
+        SELECT id, numero, piso, tipo, capacidad, estado, precio_base, precio_corporativo, descripcion, amenidades, activa, created_at, updated_at
+        FROM habitaciones_old;
+      `);
+      db.exec('DROP TABLE habitaciones_old;');
+    });
+
+    migrar();
+    console.log('✅ Tabla habitaciones migrada — ya acepta cualquier tipo del catálogo');
+  }
+  } catch (err) {
+    console.error('⚠️  Migración habitaciones (quitar CHECK viejo) falló:', err.message);
+    console.error('   Usá GET /api/diag y /api/repair-habitaciones para diagnosticar y reparar manualmente.');
+  }
 }
 
 function seedInitialData() {
@@ -422,12 +788,38 @@ function seedInitialData() {
     ['moneda_principal', 'HNL', 'Moneda principal del sistema'],
     ['vista_previa_impresion', '1', '1=siempre vista previa, 0=impresión directa'],
     ['impresion_copias_default', '1', 'Número de copias por defecto'],
+    ['smtp_host', '', 'Servidor SMTP para envío de correos'],
+    ['smtp_port', '587', 'Puerto SMTP'],
+    ['smtp_user', '', 'Usuario SMTP'],
+    ['smtp_pass', '', 'Contraseña SMTP'],
+    ['smtp_from', '', 'Correo remitente de notificaciones'],
+    ['notif_email_reservas', '1', '1=enviar email al crear reserva'],
+    ['notif_email_checkin', '1', '1=enviar email al hacer check-in'],
+    ['notif_email_factura', '1', '1=enviar email al emitir factura'],
+    ['hora_checkin', '15:00', 'Hora estándar de check-in'],
+    ['hora_checkout', '12:00', 'Hora estándar de check-out'],
+    ['recargo_hora_porcentaje', '10', 'Recargo % por hora/fracción fuera de horario'],
   ];
 
   const insertConfig = db.prepare(
     'INSERT OR IGNORE INTO configuracion_hotel (clave, valor, descripcion) VALUES (?, ?, ?)'
   );
   configs.forEach(([clave, valor, desc]) => insertConfig.run(clave, valor, desc));
+
+  // Catálogo inicial de tipos de habitación (los que ya existían, ahora editables)
+  const tiposExisten = db.prepare('SELECT id FROM tipos_habitacion LIMIT 1').get();
+  if (!tiposExisten) {
+    const insertTipo = db.prepare(
+      'INSERT INTO tipos_habitacion (nombre, capacidad_sugerida, precio_sugerido, descripcion) VALUES (?, ?, ?, ?)'
+    );
+    [
+      ['SENCILLA',  1, 700,  'Habitación individual estándar'],
+      ['DOBLE',     2, 900,  'Habitación con dos camas o cama doble'],
+      ['SUITE',     2, 1500, 'Suite con sala de estar'],
+      ['EJECUTIVA', 2, 1800, 'Habitación ejecutiva con amenidades premium'],
+      ['FAMILIAR',  4, 1300, 'Habitación amplia para familias'],
+    ].forEach(([nombre, cap, precio, desc]) => insertTipo.run(nombre, cap, precio, desc));
+  }
 
   // Usuario admin por defecto
   const adminExists = db.prepare('SELECT id FROM usuarios WHERE username = ?').get('admin');
@@ -460,7 +852,8 @@ function seedInitialData() {
   // Tasa de cambio inicial
   const tasaExiste = db.prepare('SELECT id FROM tasa_cambio LIMIT 1').get();
   if (!tasaExiste) {
-    db.prepare('INSERT INTO tasa_cambio (fecha, usd_a_hnl) VALUES (date(\'now\'), ?)').run(24.85);
+    db.prepare(`INSERT INTO tasa_cambio (fecha, tasa_compra, tasa_venta, observaciones) VALUES (date('now'), ?, ?, ?)`)
+      .run(24.85, 25.10, 'Tasa inicial del sistema');
   }
 
   // Temporada por defecto

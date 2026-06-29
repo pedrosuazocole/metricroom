@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { FileBarChart, Printer, Download, Calendar, Users, DollarSign, BarChart2 } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
 
 const REPORTES = [
   { id: 'cierre_caja', icon: DollarSign, label: 'Cierre de Caja', desc: 'Cuadre por turno y método de pago', color: 'emerald' },
@@ -120,7 +121,7 @@ function ReporteCierreCaja({ datos, desde, hasta }) {
       <div className="grid sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4">
           <p className="text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-1">Total Ingresos</p>
-          <p className="text-2xl font-bold text-white">L. {parseFloat(datos.total_ingresos || 0).toFixed(2)}</p>
+          <p className="text-2xl font-bold text-white"><PrecioDual monto={datos.total_ingresos || 0} size="xl" /></p>
         </div>
         <div className="bg-brand-500/10 border border-brand-500/20 rounded-xl p-4">
           <p className="text-brand-400 text-xs font-semibold uppercase tracking-wider mb-1">Total ISV</p>
@@ -141,7 +142,7 @@ function ReporteCierreCaja({ datos, desde, hasta }) {
             <tr key={i} className="table-row">
               <td className="table-cell font-medium text-slate-200">{m.metodo_pago}</td>
               <td className="table-cell text-slate-400">{m.cantidad}</td>
-              <td className="table-cell font-semibold text-white">L. {parseFloat(m.total).toFixed(2)}</td>
+              <td className="table-cell font-semibold text-white"><PrecioDual monto={m.total} size="sm" /></td>
             </tr>
           ))}
         </tbody>
@@ -265,7 +266,7 @@ function ReporteOcupacion({ datos, desde, hasta }) {
                   <td className="table-cell text-slate-400 text-xs">{h.tipo}</td>
                   <td className="table-cell text-slate-500 text-xs">{h.piso}</td>
                   <td className="table-cell text-slate-200">{h.noches}</td>
-                  <td className="table-cell font-semibold text-white">L. {parseFloat(h.ingresos || 0).toFixed(2)}</td>
+                  <td className="table-cell font-semibold text-white"><PrecioDual monto={h.ingresos || 0} size="sm" /></td>
                 </tr>
               ))}
             </tbody>

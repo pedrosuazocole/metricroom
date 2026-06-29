@@ -1,12 +1,16 @@
-// src/pages/ClientesPage.jsx - Clientes corporativos y líneas de crédito
+// src/pages/ClientesPage.jsx - Clientes corporativos, líneas de crédito y tarifas especiales
 import { useState, useEffect } from 'react'
-import { Building2, Plus, X, Phone, Mail, CreditCard } from 'lucide-react'
+import { Building2, Plus, X, Phone, Mail, CreditCard, Tag, Save } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
+import MoneyInput from '../components/common/MoneyInput'
 
 export default function ClientesPage() {
   const [clientes, setClientes] = useState([])
   const [showModal, setShowModal] = useState(false)
+  const [showTarifas, setShowTarifas] = useState(false)
+  const [clienteTarifas, setClienteTarifas] = useState(null)
   const [loading, setLoading] = useState(true)
   const [busqueda, setBusqueda] = useState('')
   const [form, setForm] = useState({
@@ -46,6 +50,7 @@ export default function ClientesPage() {
   })
 
   const editar = (c) => { setForm({ ...c }); setShowModal(true) }
+  const abrirTarifas = (c) => { setClienteTarifas(c); setShowTarifas(true) }
 
   return (
     <div className="space-y-5">
@@ -79,7 +84,12 @@ export default function ClientesPage() {
               <div className="w-10 h-10 bg-brand-600/20 rounded-xl flex items-center justify-center flex-shrink-0">
                 <Building2 className="w-5 h-5 text-brand-400" />
               </div>
-              <button onClick={() => editar(c)} className="text-brand-400 hover:text-brand-300 text-xs px-2 py-1 rounded border border-brand-500/30">Editar</button>
+              <div className="flex gap-1.5">
+                <button onClick={() => abrirTarifas(c)} className="text-emerald-400 hover:text-emerald-300 text-xs px-2 py-1 rounded border border-emerald-500/30 flex items-center gap-1">
+                  <Tag className="w-3 h-3" /> Tarifas
+                </button>
+                <button onClick={() => editar(c)} className="text-brand-400 hover:text-brand-300 text-xs px-2 py-1 rounded border border-brand-500/30">Editar</button>
+              </div>
             </div>
             <h3 className="font-semibold text-slate-200 mb-1">{c.razon_social}</h3>
             <p className="text-xs text-slate-500 mb-3">RTN: {c.rtn || '—'}</p>
@@ -107,13 +117,14 @@ export default function ClientesPage() {
               <span className="text-xs text-slate-500">{c.condiciones_pago}</span>
               <div className="flex items-center gap-1 text-sm">
                 <CreditCard className="w-3.5 h-3.5 text-brand-400" />
-                <span className="text-brand-400 font-medium">L. {parseFloat(c.credito_limite || 0).toLocaleString('es-HN')}</span>
+                <span className="text-brand-400 font-medium"><PrecioDual monto={c.credito_limite || 0} size="sm" /></span>
               </div>
             </div>
           </div>
         ))}
       </div>
 
+      {/* Modal Crear/Editar Cliente */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-xl max-h-[95vh] overflow-y-auto">
@@ -150,8 +161,8 @@ export default function ClientesPage() {
                   <input type="email" value={form.contacto_email} onChange={e => setForm(p => ({ ...p, contacto_email: e.target.value }))} className="input-field" />
                 </div>
                 <div>
-                  <label className="label">Límite de Crédito (L.)</label>
-                  <input type="number" min="0" step="100" value={form.credito_limite} onChange={e => setForm(p => ({ ...p, credito_limite: e.target.value }))} className="input-field" />
+                  <label className="label">Límite de Crédito</label>
+                  <MoneyInput valueHNL={form.credito_limite} onChange={val => setForm(p => ({ ...p, credito_limite: val }))} />
                 </div>
                 <div className="sm:col-span-2">
                   <label className="label">Dirección</label>
@@ -170,6 +181,108 @@ export default function ClientesPage() {
           </div>
         </div>
       )}
+
+      {/* Modal Tarifas Especiales por Tipo de Habitación */}
+      {showTarifas && clienteTarifas && (
+        <ModalTarifasCliente cliente={clienteTarifas} onClose={() => setShowTarifas(false)} />
+      )}
+    </div>
+  )
+}
+
+// ─── Tarifas especiales de un cliente corporativo por tipo de habitación ──────
+function ModalTarifasCliente({ cliente, onClose }) {
+  const [tiposHabitacion, setTiposHabitacion] = useState([])
+  const [tarifasExistentes, setTarifasExistentes] = useState([])
+  const [precios, setPrecios] = useState({}) // { tipo_habitacion_id: precio }
+  const [loading, setLoading] = useState(true)
+  const [guardando, setGuardando] = useState(false)
+
+  useEffect(() => {
+    const cargar = async () => {
+      setLoading(true)
+      try {
+        const [tipos, tarifas] = await Promise.all([
+          api.get('/tipos-habitacion'),
+          api.get(`/tipos-habitacion/tarifas-cliente/${cliente.id}`),
+        ])
+        setTiposHabitacion(tipos.data.data || [])
+        setTarifasExistentes(tarifas.data.data || [])
+        const mapa = {}
+        ;(tarifas.data.data || []).forEach(t => { mapa[t.tipo_habitacion_id] = t.precio })
+        setPrecios(mapa)
+      } finally { setLoading(false) }
+    }
+    cargar()
+  }, [cliente.id])
+
+  const guardar = async (e) => {
+    e.preventDefault()
+    setGuardando(true)
+    try {
+      const tarifas = Object.entries(precios)
+        .filter(([, precio]) => precio !== '' && precio !== null && precio !== undefined)
+        .map(([tipo_habitacion_id, precio]) => ({ tipo_habitacion_id: parseInt(tipo_habitacion_id), precio: parseFloat(precio) }))
+      await api.put(`/tipos-habitacion/tarifas-cliente/${cliente.id}`, { tarifas })
+      toast.success(`Tarifas de ${cliente.razon_social} guardadas`)
+      onClose()
+    } catch { /* toast manejado por interceptor */ }
+    finally { setGuardando(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70">
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-5 border-b border-slate-700">
+          <div>
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <Tag className="w-4 h-4 text-emerald-400" /> Tarifas Especiales
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">{cliente.razon_social}</p>
+          </div>
+          <button onClick={onClose}><X className="w-5 h-5 text-slate-500" /></button>
+        </div>
+
+        <form onSubmit={guardar} className="p-5 space-y-4">
+          <p className="text-xs text-slate-500 bg-slate-900/50 rounded-lg px-3 py-2">
+            Definí el precio negociado por noche para este cliente, por cada tipo de habitación. Dejá un campo vacío si no aplica tarifa especial para ese tipo — se usará el precio normal.
+          </p>
+
+          {loading ? (
+            <div className="text-center py-8 text-slate-600">Cargando...</div>
+          ) : tiposHabitacion.length === 0 ? (
+            <div className="text-center py-8 text-slate-600">
+              <p className="text-sm">No hay tipos de habitación configurados.</p>
+              <p className="text-xs mt-1">Creálos primero en Configuración → Tipos de Habitación.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {tiposHabitacion.map(t => (
+                <div key={t.id} className="flex items-center gap-3 bg-slate-900/40 rounded-lg p-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-slate-200">{t.nombre}</p>
+                    <p className="text-xs text-slate-500">Normal: <PrecioDual monto={t.precio_sugerido} size="xs" /></p>
+                  </div>
+                  <div className="w-44">
+                    <MoneyInput
+                      valueHNL={precios[t.id] ?? ''}
+                      onChange={val => setPrecios(p => ({ ...p, [t.id]: val }))}
+                      placeholder="Sin tarifa especial"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
+            <button type="submit" disabled={guardando || loading} className="btn-primary">
+              <Save className="w-4 h-4" /> {guardando ? 'Guardando...' : 'Guardar Tarifas'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

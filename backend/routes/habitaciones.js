@@ -3,6 +3,22 @@ const express = require('express');
 const router = express.Router();
 const { getDB } = require('../db/database');
 
+// Normaliza el campo amenidades a un string JSON válido de array, sin importar
+// si llega como array (lo normal) o ya como string JSON (evita doble-stringify).
+function normalizarAmenidades(amenidades) {
+  if (amenidades === undefined || amenidades === null) return null;
+  if (Array.isArray(amenidades)) return JSON.stringify(amenidades);
+  if (typeof amenidades === 'string') {
+    try {
+      const parsed = JSON.parse(amenidades);
+      return Array.isArray(parsed) ? amenidades : JSON.stringify([]);
+    } catch {
+      return JSON.stringify([]); // string no-JSON, descartar para no corromper datos
+    }
+  }
+  return JSON.stringify([]);
+}
+
 // GET /api/habitaciones - Listar todas con estado actual
 router.get('/', (req, res) => {
   try {
@@ -40,17 +56,25 @@ router.get('/planning', (req, res) => {
         g.empresa,
         r.tipo_garantia,
         r.id AS reserva_id,
+        -- Reserva CONFIRMADA/GARANTIZADA pendiente de check-in para esta habitación
+        -- (distinta de "reserva_id" arriba, que solo se llena si ya hay check-in activo).
+        -- Se usa para precargar el modal de Check-In desde Planning con un solo clic.
+        rp.id AS reserva_pendiente_id,
         COALESCE((
           SELECT SUM(subtotal) FROM servicios_extras se WHERE se.checkin_id = c.id
         ), 0) + COALESCE(r.tarifa_aplicada, 0) * CAST(
-          (julianday(COALESCE(c.fecha_checkout_prevista, date(\'now\'))) - julianday(COALESCE(c.fecha_checkin, date(\'now\'))))
+          (julianday(COALESCE(c.fecha_checkout_prevista, date('now'))) - julianday(COALESCE(c.fecha_checkin, date('now'))))
           AS INTEGER)
         AS saldo_estimado
       FROM habitaciones h
       LEFT JOIN checkins c ON c.habitacion_id = h.id AND c.estado = 'ACTIVO'
       LEFT JOIN reservas r ON c.reserva_id = r.id
       LEFT JOIN huespedes g ON c.huesped_id = g.id
+      LEFT JOIN reservas rp ON rp.habitacion_id = h.id
+        AND rp.estado IN ('CONFIRMADA', 'GARANTIZADA')
+        AND rp.id NOT IN (SELECT COALESCE(reserva_id, 0) FROM checkins WHERE estado = 'ACTIVO')
       WHERE h.activa = 1
+      GROUP BY h.id
       ORDER BY h.piso, h.numero
     `).all();
 
@@ -114,7 +138,7 @@ router.post('/', (req, res) => {
       INSERT INTO habitaciones (numero, piso, tipo, capacidad, precio_base, precio_corporativo, descripcion, amenidades)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(numero, piso, tipo, capacidad || 2, precio_base, precio_corporativo, descripcion, 
-           amenidades ? JSON.stringify(amenidades) : null);
+           normalizarAmenidades(amenidades));
 
     res.status(201).json({ ok: true, data: { id: result.lastInsertRowid }, message: 'Habitación creada' });
   } catch (e) {
@@ -142,7 +166,7 @@ router.put('/:id', (req, res) => {
         updated_at = datetime(\'now\',\'localtime\')
       WHERE id = ?
     `).run(numero, piso, tipo, capacidad, precio_base, precio_corporativo, descripcion,
-           amenidades ? JSON.stringify(amenidades) : undefined, activa, req.params.id);
+           amenidades !== undefined ? normalizarAmenidades(amenidades) : undefined, activa, req.params.id);
 
     if (result.changes === 0) return res.status(404).json({ ok: false, error: 'Habitación no encontrada' });
     res.json({ ok: true, message: 'Habitación actualizada' });

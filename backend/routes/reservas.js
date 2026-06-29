@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { getDB } = require('../db/database');
 const { sendWhatsApp } = require('../utils/whatsapp');
+const { sendReservaEmail } = require('../utils/email');
 
 // Generar código único de reserva
 function generarCodigo() {
@@ -59,6 +60,24 @@ router.get('/', (req, res) => {
   }
 });
 
+// GET /api/reservas/disponibilidad/:habitacion_id - Fechas ocupadas para el calendario
+router.get('/disponibilidad/:habitacion_id', (req, res) => {
+  try {
+    const db = getDB();
+    const ocupadas = db.prepare(`
+      SELECT fecha_entrada, fecha_salida, codigo, estado
+      FROM reservas
+      WHERE habitacion_id = ?
+        AND estado NOT IN ('CANCELADA','CHECKOUT','NO_SHOW')
+        AND fecha_salida >= date('now')
+      ORDER BY fecha_entrada ASC
+    `).all(req.params.habitacion_id);
+    res.json({ ok: true, data: ocupadas });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // GET /api/reservas/hoy - Check-ins y checkouts del día
 router.get('/hoy', (req, res) => {
   try {
@@ -110,18 +129,24 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/reservas - Crear nueva reserva
+// Acepta huesped_id (existente) O huesped_nuevo (objeto con datos para crear al vuelo)
 router.post('/', (req, res) => {
   try {
     const db = getDB();
     const {
-      huesped_id, habitacion_id, fecha_entrada, fecha_salida,
+      huesped_id, huesped_nuevo, habitacion_id, fecha_entrada, fecha_salida,
       adultos, ninos, tipo_garantia, monto_deposito, motivo_visita,
-      empresa, tarifa_aplicada, moneda, tasa_cambio, notas, origen,
+      empresa, cliente_corporativo_id, tarifa_aplicada, moneda, tasa_cambio, notas, origen,
     } = req.body;
 
-    // Validaciones obligatorias
-    if (!huesped_id || !habitacion_id || !fecha_entrada || !fecha_salida || !tarifa_aplicada) {
+    if (!habitacion_id || !fecha_entrada || !fecha_salida || !tarifa_aplicada) {
       return res.status(400).json({ ok: false, error: 'Campos requeridos incompletos' });
+    }
+    if (!huesped_id && !huesped_nuevo) {
+      return res.status(400).json({ ok: false, error: 'Debe indicar huesped_id o los datos del nuevo huésped' });
+    }
+    if (new Date(fecha_salida) <= new Date(fecha_entrada)) {
+      return res.status(400).json({ ok: false, error: 'La fecha de salida debe ser posterior a la entrada' });
     }
 
     // Verificar disponibilidad: sin traslape de fechas
@@ -142,23 +167,57 @@ router.post('/', (req, res) => {
     const total_estimado = tarifa_aplicada * noches;
     const codigo = generarCodigo();
 
-    const result = db.prepare(`
-      INSERT INTO reservas (
-        codigo, huesped_id, habitacion_id, fecha_entrada, fecha_salida, noches,
-        adultos, ninos, tipo_garantia, monto_deposito, motivo_visita, empresa,
-        tarifa_aplicada, moneda, tasa_cambio, total_estimado, notas, origen, estado
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMADA')
-    `).run(
-      codigo, huesped_id, habitacion_id, fecha_entrada, fecha_salida, noches,
-      adultos || 1, ninos || 0, tipo_garantia, monto_deposito || 0, motivo_visita,
-      empresa, tarifa_aplicada, moneda || 'HNL', tasa_cambio || 1, total_estimado, notas, origen || 'MOSTRADOR'
-    );
+    const crearReserva = db.transaction(() => {
+      // Si vienen datos de huésped nuevo, crearlo primero (o reutilizar si ya existe el documento)
+      let huespedIdFinal = huesped_id;
+      if (!huespedIdFinal && huesped_nuevo) {
+        const { nombres, apellidos, tipo_doc, numero_doc, rtn, email, telefono,
+                nacionalidad, empresa: empresaHuesped, exento_isv } = huesped_nuevo;
 
-    // Marcar habitación como reservada
-    db.prepare(`UPDATE habitaciones SET estado = 'RESERVADA' WHERE id = ?`).run(habitacion_id);
+        if (!nombres || !apellidos || !tipo_doc || !numero_doc) {
+          throw new Error('Datos del huésped incompletos: nombres, apellidos, tipo_doc y numero_doc son requeridos');
+        }
 
-    // Notificación WhatsApp
-    const huesped = db.prepare('SELECT * FROM huespedes WHERE id = ?').get(huesped_id);
+        // Evitar duplicar huésped si ya existe ese documento
+        const existente = db.prepare('SELECT id FROM huespedes WHERE numero_doc = ?').get(numero_doc);
+        if (existente) {
+          huespedIdFinal = existente.id;
+        } else {
+          const rH = db.prepare(`
+            INSERT INTO huespedes (nombres, apellidos, tipo_doc, numero_doc, rtn, email, telefono,
+              nacionalidad, empresa, exento_isv)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(nombres, apellidos, tipo_doc, numero_doc, rtn || null, email || null, telefono || null,
+                 nacionalidad || 'Hondureña', empresaHuesped || empresa || null, exento_isv ? 1 : 0);
+          huespedIdFinal = rH.lastInsertRowid;
+        }
+      }
+
+      const result = db.prepare(`
+        INSERT INTO reservas (
+          codigo, huesped_id, habitacion_id, fecha_entrada, fecha_salida, noches,
+          adultos, ninos, tipo_garantia, monto_deposito, motivo_visita, empresa,
+          cliente_corporativo_id, tarifa_aplicada, moneda, tasa_cambio, total_estimado,
+          notas, origen, estado
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMADA')
+      `).run(
+        codigo, huespedIdFinal, habitacion_id, fecha_entrada, fecha_salida, noches,
+        adultos || 1, ninos || 0, tipo_garantia, monto_deposito || 0, motivo_visita,
+        empresa, cliente_corporativo_id || null, tarifa_aplicada, moneda || 'HNL',
+        tasa_cambio || 1, total_estimado, notas, origen || 'MOSTRADOR'
+      );
+
+      db.prepare(`UPDATE habitaciones SET estado = 'RESERVADA' WHERE id = ?`).run(habitacion_id);
+
+      return { reservaId: result.lastInsertRowid, huespedIdFinal };
+    });
+
+    const { reservaId, huespedIdFinal } = crearReserva();
+
+    // Notificaciones — WhatsApp y Email
+    const huesped = db.prepare('SELECT * FROM huespedes WHERE id = ?').get(huespedIdFinal);
+    const habitacionInfo = db.prepare('SELECT numero FROM habitaciones WHERE id = ?').get(habitacion_id);
+
     if (huesped?.telefono) {
       const msg = `🏨 *MetricRoom* - Reserva Confirmada\n` +
         `Hola ${huesped.nombres}, tu reserva *${codigo}* ha sido confirmada.\n` +
@@ -166,8 +225,19 @@ router.post('/', (req, res) => {
         `¡Te esperamos!`;
       sendWhatsApp(huesped.telefono, msg).catch(console.error);
     }
+    if (huesped?.email) {
+      sendReservaEmail(huesped.email, {
+        codigo, huesped: huesped.nombres,
+        habitacionNumero: habitacionInfo?.numero,
+        fechaEntrada: fecha_entrada, fechaSalida: fecha_salida,
+      }).catch(console.error);
+    }
 
-    res.status(201).json({ ok: true, data: { id: result.lastInsertRowid, codigo }, message: 'Reserva creada exitosamente' });
+    res.status(201).json({
+      ok: true,
+      data: { id: reservaId, codigo, huesped_id: huespedIdFinal },
+      message: 'Reserva creada exitosamente'
+    });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }

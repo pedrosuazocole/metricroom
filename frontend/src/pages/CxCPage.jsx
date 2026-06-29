@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import { TrendingUp, DollarSign, X, Plus } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
+import MoneyInput from '../components/common/MoneyInput'
 
 export default function CxCPage() {
   const [cuentas, setCuentas] = useState([])
@@ -52,7 +54,7 @@ export default function CxCPage() {
       <div className="grid grid-cols-3 gap-4">
         <div className="stat-card">
           <p className="text-slate-400 text-sm mb-1">Total por Cobrar</p>
-          <p className="text-2xl font-bold text-white">L. {parseFloat(resumen.total_pendiente || 0).toLocaleString('es-HN', { minimumFractionDigits: 2 })}</p>
+          <p className="text-2xl font-bold text-white"><PrecioDual monto={resumen.total_pendiente || 0} size="xl" /></p>
         </div>
         <div className="stat-card">
           <p className="text-slate-400 text-sm mb-1">Clientes con Saldo</p>
@@ -60,7 +62,7 @@ export default function CxCPage() {
         </div>
         <div className="stat-card">
           <p className="text-slate-400 text-sm mb-1">Saldo Vencido</p>
-          <p className="text-2xl font-bold text-red-400">L. {parseFloat(resumen.saldo_vencido || 0).toLocaleString('es-HN', { minimumFractionDigits: 2 })}</p>
+          <p className="text-2xl font-bold text-red-400"><PrecioDual monto={resumen.saldo_vencido || 0} size="xl" /></p>
         </div>
       </div>
 
@@ -92,9 +94,9 @@ export default function CxCPage() {
                   <td className="table-cell font-mono text-xs text-brand-400">{c.numero_factura || '—'}</td>
                   <td className="table-cell text-slate-400 text-sm">{c.fecha_emision?.split('T')[0]}</td>
                   <td className={`table-cell text-sm font-medium ${colorVenc(dias)}`}>{dias > 0 ? `+${dias}d` : 'Vigente'}</td>
-                  <td className="table-cell text-slate-300">L. {parseFloat(c.monto_total).toFixed(2)}</td>
-                  <td className="table-cell text-emerald-400">L. {parseFloat(c.monto_abonado || 0).toFixed(2)}</td>
-                  <td className="table-cell font-bold text-white">L. {parseFloat(c.saldo_pendiente).toFixed(2)}</td>
+                  <td className="table-cell text-slate-300"><PrecioDual monto={c.monto_total} size="sm" /></td>
+                  <td className="table-cell text-emerald-400"><PrecioDual monto={c.monto_abonado || 0} size="sm" /></td>
+                  <td className="table-cell font-bold text-white"><PrecioDual monto={c.saldo_pendiente} size="sm" /></td>
                   <td className="table-cell">
                     <span className={`text-xs px-2 py-0.5 rounded-full border ${c.estado === 'PAGADO' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>
                       {c.estado}
@@ -124,8 +126,8 @@ export default function CxCPage() {
             </div>
             <form onSubmit={abonar} className="p-6 space-y-4">
               <div>
-                <label className="label">Monto del Abono (L.) *</label>
-                <input type="number" step="0.01" min="0.01" value={abono.monto} onChange={e => setAbono(p => ({ ...p, monto: e.target.value }))} className="input-field" required />
+                <label className="label">Monto del Abono *</label>
+                <MoneyInput valueHNL={abono.monto} onChange={val => setAbono(p => ({ ...p, monto: val }))} required />
               </div>
               <div>
                 <label className="label">Método de Pago</label>

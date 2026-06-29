@@ -5,6 +5,7 @@ import { RefreshCw, BedDouble, X, Calendar, LogIn, LogOut, ArrowLeftRight } from
 import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
+import PrecioDual from '../components/common/PrecioDual'
 
 const ESTADOS = {
   DISPONIBLE:            { label: 'Disponible',  bg: 'bg-emerald-500', border: 'border-emerald-400', text: 'text-emerald-400', dot: '#22c55e' },
@@ -110,17 +111,24 @@ export default function PlanningPage() {
     } finally { setCambiando(false) }
   }
 
-  const handleCheckout = async () => {
+  const handleCheckout = () => {
+    // En vez de hacer el check-out directo, llevamos al recepcionista a
+    // Facturación con el huésped/habitación/checkin ya precargados. El
+    // check-out real de la habitación se hace después, como paso separado
+    // (el recepcionista vuelve a Planning y usa el botón de Check-In/Out o
+    // lo hace desde el módulo de Check-Ins una vez que la factura ya existe).
     if (!selected?.checkin_id) return toast.error('No hay check-in activo')
-    if (!confirm(`¿Confirmar Check-Out de Hab. ${selected.numero}?`)) return
-    try {
-      await api.post(`/checkins/${selected.checkin_id}/checkout`, {})
-      toast.success('Check-Out realizado. Habitación en limpieza.')
-      setSelected(null)
-      cargar()
-    } catch (e) {
-      toast.error(e.response?.data?.error || 'Error al hacer Check-Out')
-    }
+    navigate('/facturas', {
+      state: {
+        precargarDesdeCheckin: {
+          checkin_id: selected.checkin_id,
+          huesped_nombre: selected.huesped_nombre,
+          habitacion_numero: selected.numero,
+          tarifa_aplicada: selected.precio_base,
+          saldo_estimado: selected.saldo_estimado,
+        }
+      }
+    })
   }
 
   if (loading) {
@@ -151,7 +159,9 @@ export default function PlanningPage() {
       icon: LogIn,
       label: 'Check-In',
       color: 'bg-emerald-600/20 border-emerald-500/40 text-emerald-400 hover:bg-emerald-600/30',
-      onClick: () => navigate('/checkins'),
+      onClick: () => navigate('/checkins', {
+        state: { preseleccionarReservaId: selected.reserva_pendiente_id }
+      }),
     },
     // Cambio de habitación — solo si está OCUPADA
     {
@@ -355,7 +365,7 @@ export default function PlanningPage() {
               <div className="bg-slate-900/50 rounded-lg p-3">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Tarifa</span>
-                  <span className="text-white font-semibold">L. {selected.precio_base?.toLocaleString('es-HN')}/noche</span>
+                  <span className="text-white font-semibold"><PrecioDual monto={selected.precio_base || 0} size="sm" />/noche</span>
                 </div>
               </div>
 

@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { getDB } = require('../db/database');
 const { sendWhatsApp } = require('../utils/whatsapp');
+const { sendFacturaEmail } = require('../utils/email');
 
 // Generar número de factura formato SAR: 000-001-01-00000001
 function generarNumeroFactura(db) {
@@ -101,7 +102,18 @@ router.get('/:id', (req, res) => {
     const configs = db.prepare('SELECT clave, valor FROM configuracion_hotel').all();
     configs.forEach(c => hotel[c.clave] = c.valor);
 
-    res.json({ ok: true, data: { ...factura, detalle, huesped, hotel } });
+    // Datos del CAI vigente al momento de consultar (para mostrar rango y fecha límite en la impresión)
+    const sar = db.prepare('SELECT rango_inicial, rango_final, fecha_limite_emision FROM configuracion_sar WHERE cai = ?').get(factura.cai);
+
+    res.json({
+      ok: true,
+      data: {
+        ...factura, detalle, huesped, hotel,
+        rango_inicial: sar?.rango_inicial,
+        rango_final: sar?.rango_final,
+        fecha_limite_emision: sar?.fecha_limite_emision,
+      }
+    });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -114,9 +126,15 @@ router.post('/', (req, res) => {
     const {
       checkin_id, reserva_id, huesped_id,
       cliente_nombre, cliente_rtn, cliente_direccion,
-      items, // Array: [{descripcion, cantidad, precio_unitario, tipo_impuesto}]
+      // items: [{ descripcion, cantidad, precio_unitario, aplica_isv: bool, aplica_iht: bool }]
+      // Regla de negocio Honduras (Hotel):
+      //  - Hospedaje: ISV 15% + IHT 4% (ambos, sobre el mismo subtotal)
+      //  - Otros servicios (restaurante, lavandería, etc.): solo ISV 15%
+      //  - Cliente exonerado de ISV: el IHT 4% se sigue cobrando igual, ISV se omite
+      items,
       moneda, tasa_cambio, metodo_pago,
       descuento, observaciones, created_by,
+      forzar_exento_isv, // true si el huésped/cliente está exonerado de ISV
     } = req.body;
 
     if (!huesped_id || !items?.length || !metodo_pago) {
@@ -129,20 +147,31 @@ router.post('/', (req, res) => {
     const TASA_ISV = (parseFloat(cfgIsv?.valor) || 15) / 100;  // default 15%
     const TASA_IHT = (parseFloat(cfgIht?.valor) || 4)  / 100;  // default 4%
 
-    // Calcular totales con impuestos SAR Honduras
-    let subtotal_exento = 0, subtotal_gravado_isv = 0, subtotal_gravado_iht = 0;
+    // Detectar exoneración: por flag explícito en el request o por configuración del huésped
+    const huespedRow = db.prepare('SELECT exento_isv FROM huespedes WHERE id = ?').get(huesped_id);
+    const exentoISV = !!(forzar_exento_isv || huespedRow?.exento_isv);
 
-    items.forEach(item => {
+    // Calcular bases gravables — un mismo ítem puede contribuir a ambas bases a la vez
+    let base_isv = 0;   // base gravable ISV 15%
+    let base_iht = 0;   // base gravable IHT 4%
+    let base_exenta = 0; // parte que no paga ningún impuesto (ni ISV ni IHT)
+
+    const itemsCalculados = items.map(item => {
       const sub = (item.cantidad || 1) * item.precio_unitario;
-      if (item.tipo_impuesto === 'ISV') subtotal_gravado_isv += sub;
-      else if (item.tipo_impuesto === 'IHT') subtotal_gravado_iht += sub;
-      else subtotal_exento += sub;
+      const aplicaIsv = !!item.aplica_isv && !exentoISV;
+      const aplicaIht = !!item.aplica_iht;
+
+      if (aplicaIsv) base_isv += sub;
+      if (aplicaIht) base_iht += sub;
+      if (!aplicaIsv && !aplicaIht) base_exenta += sub;
+
+      return { ...item, sub, aplicaIsv, aplicaIht };
     });
 
-    const isv_15 = subtotal_gravado_isv * TASA_ISV;
-    const iht_4  = subtotal_gravado_iht * TASA_IHT;
+    const isv_15 = base_isv * TASA_ISV;
+    const iht_4  = base_iht * TASA_IHT;
     const desc = descuento || 0;
-    const total = subtotal_exento + subtotal_gravado_isv + subtotal_gravado_iht + isv_15 + iht_4 - desc;
+    const total = base_exenta + base_isv + base_iht + isv_15 + iht_4 - desc;
 
     // Transacción atómica
     const emitir = db.transaction(() => {
@@ -161,21 +190,21 @@ router.post('/', (req, res) => {
         numero, cai, checkin_id, reserva_id, huesped_id,
         cliente_nombre, cliente_rtn, cliente_direccion,
         moneda || 'HNL', tasa_cambio || 1,
-        subtotal_exento, subtotal_gravado_isv, subtotal_gravado_iht,
+        base_exenta, base_isv, base_iht,
         isv_15, iht_4, desc, total, metodo_pago, observaciones, created_by
       );
 
       const facturaId = result.lastInsertRowid;
 
-      // Insertar detalles
       const insertDetalle = db.prepare(`
-        INSERT INTO detalle_facturas (factura_id, descripcion, cantidad, precio_unitario, tipo_impuesto, subtotal)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO detalle_facturas (factura_id, descripcion, cantidad, precio_unitario, aplica_isv, aplica_iht, subtotal)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
-      items.forEach(item => {
-        insertDetalle.run(facturaId, item.descripcion, item.cantidad || 1,
-          item.precio_unitario, item.tipo_impuesto || 'EXENTO',
-          (item.cantidad || 1) * item.precio_unitario);
+      itemsCalculados.forEach(item => {
+        insertDetalle.run(
+          facturaId, item.descripcion, item.cantidad || 1, item.precio_unitario,
+          item.aplicaIsv ? 1 : 0, item.aplicaIht ? 1 : 0, item.sub
+        );
       });
 
       return { facturaId, numero, total };
@@ -191,6 +220,9 @@ router.post('/', (req, res) => {
         `Total: *L. ${totalFinal.toFixed(2)}*\n` +
         `¡Gracias por preferirnos!`;
       sendWhatsApp(huesped.telefono, msg).catch(console.error);
+    }
+    if (huesped?.email) {
+      sendFacturaEmail(huesped.email, numero, totalFinal, huesped.nombres).catch(console.error);
     }
 
     res.status(201).json({

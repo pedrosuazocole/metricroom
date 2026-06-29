@@ -1,6 +1,8 @@
 // src/App.jsx - Enrutador principal de MetricRoom
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { TasaCambioProvider } from './context/TasaCambioContext'
+import ErrorBoundary from './components/common/ErrorBoundary'
 import Layout from './components/layout/Layout'
 import LoginPage        from './pages/LoginPage'
 import DashboardPage    from './pages/DashboardPage'
@@ -60,8 +62,12 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppRoutes />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <TasaCambioProvider>
+          <AppRoutes />
+        </TasaCambioProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   )
 }
