@@ -555,6 +555,72 @@ function migrarEsquemaViejo() {
     console.error('⚠️  Migración reservas.cliente_corporativo_id falló:', err.message);
   }
 
+  // ── Migración: habitaciones (quitar CHECK viejo de tipo fijo) ──
+  // SQLite no permite ALTER para quitar un CHECK constraint, así que se reconstruye
+  // la tabla completa preservando todos los datos existentes.
+  try {
+  const tablaExiste = (nombre) =>
+    !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(nombre);
+
+  const habitacionesTieneCheckViejo = (() => {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='habitaciones'").get();
+    return row && /CHECK\s*\(\s*tipo\s+IN/i.test(row.sql);
+  })();
+
+  // Caso A: una corrida anterior se interrumpió a mitad de la migración y dejó
+  // "habitaciones_old" huérfana (la tabla "habitaciones" ya quedó migrada, pero
+  // el DROP final nunca se ejecutó). Si "habitaciones" ya está bien, solo limpiar.
+  if (!habitacionesTieneCheckViejo && tablaExiste('habitaciones_old')) {
+    console.log('🧹 Limpiando tabla residual habitaciones_old de una migración interrumpida...');
+    db.exec('DROP TABLE habitaciones_old;');
+  }
+
+  // Caso B: la migración nunca llegó a completarse y "habitaciones" sigue con
+  // el CHECK viejo. Reconstruir de forma atómica (todo o nada) usando una
+  // transacción real, para que un corte a mitad de camino no deje basura.
+  if (habitacionesTieneCheckViejo) {
+    console.log('🔧 Migrando tabla habitaciones para permitir tipos personalizados...');
+
+    // Si ya existe una habitaciones_old residual de un intento previo fallido,
+    // borrarla primero para que el RENAME no choque.
+    if (tablaExiste('habitaciones_old')) {
+      db.exec('DROP TABLE habitaciones_old;');
+    }
+
+    const migrar = db.transaction(() => {
+      db.exec('ALTER TABLE habitaciones RENAME TO habitaciones_old;');
+      db.exec(`
+        CREATE TABLE habitaciones (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          numero TEXT NOT NULL UNIQUE,
+          piso INTEGER NOT NULL DEFAULT 1,
+          tipo TEXT NOT NULL,
+          capacidad INTEGER NOT NULL DEFAULT 2,
+          estado TEXT NOT NULL DEFAULT 'DISPONIBLE'
+            CHECK(estado IN ('DISPONIBLE','OCUPADA','RESERVADA','BLOQUEADA','SUCIA','RESERVADA_GARANTIZADA')),
+          precio_base REAL NOT NULL DEFAULT 0,
+          precio_corporativo REAL,
+          descripcion TEXT,
+          amenidades TEXT,
+          activa INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT DEFAULT (datetime('now','localtime')),
+          updated_at TEXT DEFAULT (datetime('now','localtime'))
+        );
+      `);
+      db.exec(`
+        INSERT INTO habitaciones (id, numero, piso, tipo, capacidad, estado, precio_base, precio_corporativo, descripcion, amenidades, activa, created_at, updated_at)
+        SELECT id, numero, piso, tipo, capacidad, estado, precio_base, precio_corporativo, descripcion, amenidades, activa, created_at, updated_at
+        FROM habitaciones_old;
+      `);
+      db.exec('DROP TABLE habitaciones_old;');
+    });
+
+    migrar();
+    console.log('✅ Tabla habitaciones migrada — ya acepta cualquier tipo del catálogo');
+  }
+  } catch (err) {
+    console.error('⚠️  Migración habitaciones (quitar CHECK viejo) falló:', err.message);
+    console.error('   Usá GET /api/diag y /api/repair-habitaciones para diagnosticar y reparar manualmente.');
   // ── Migración: FK fosilizada a habitaciones_old en reservas/checkins ──
   // Cuando la tabla "habitaciones" se renombró temporalmente a "habitaciones_old"
   // durante una migración anterior, SQLite NO actualiza automáticamente las
@@ -705,72 +771,6 @@ function migrarEsquemaViejo() {
     console.error('⚠️  Migración FK fosilizada (checkins) falló:', err.message);
   }
 
-  // ── Migración: habitaciones (quitar CHECK viejo de tipo fijo) ──
-  // SQLite no permite ALTER para quitar un CHECK constraint, así que se reconstruye
-  // la tabla completa preservando todos los datos existentes.
-  try {
-  const tablaExiste = (nombre) =>
-    !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(nombre);
-
-  const habitacionesTieneCheckViejo = (() => {
-    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='habitaciones'").get();
-    return row && /CHECK\s*\(\s*tipo\s+IN/i.test(row.sql);
-  })();
-
-  // Caso A: una corrida anterior se interrumpió a mitad de la migración y dejó
-  // "habitaciones_old" huérfana (la tabla "habitaciones" ya quedó migrada, pero
-  // el DROP final nunca se ejecutó). Si "habitaciones" ya está bien, solo limpiar.
-  if (!habitacionesTieneCheckViejo && tablaExiste('habitaciones_old')) {
-    console.log('🧹 Limpiando tabla residual habitaciones_old de una migración interrumpida...');
-    db.exec('DROP TABLE habitaciones_old;');
-  }
-
-  // Caso B: la migración nunca llegó a completarse y "habitaciones" sigue con
-  // el CHECK viejo. Reconstruir de forma atómica (todo o nada) usando una
-  // transacción real, para que un corte a mitad de camino no deje basura.
-  if (habitacionesTieneCheckViejo) {
-    console.log('🔧 Migrando tabla habitaciones para permitir tipos personalizados...');
-
-    // Si ya existe una habitaciones_old residual de un intento previo fallido,
-    // borrarla primero para que el RENAME no choque.
-    if (tablaExiste('habitaciones_old')) {
-      db.exec('DROP TABLE habitaciones_old;');
-    }
-
-    const migrar = db.transaction(() => {
-      db.exec('ALTER TABLE habitaciones RENAME TO habitaciones_old;');
-      db.exec(`
-        CREATE TABLE habitaciones (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          numero TEXT NOT NULL UNIQUE,
-          piso INTEGER NOT NULL DEFAULT 1,
-          tipo TEXT NOT NULL,
-          capacidad INTEGER NOT NULL DEFAULT 2,
-          estado TEXT NOT NULL DEFAULT 'DISPONIBLE'
-            CHECK(estado IN ('DISPONIBLE','OCUPADA','RESERVADA','BLOQUEADA','SUCIA','RESERVADA_GARANTIZADA')),
-          precio_base REAL NOT NULL DEFAULT 0,
-          precio_corporativo REAL,
-          descripcion TEXT,
-          amenidades TEXT,
-          activa INTEGER NOT NULL DEFAULT 1,
-          created_at TEXT DEFAULT (datetime('now','localtime')),
-          updated_at TEXT DEFAULT (datetime('now','localtime'))
-        );
-      `);
-      db.exec(`
-        INSERT INTO habitaciones (id, numero, piso, tipo, capacidad, estado, precio_base, precio_corporativo, descripcion, amenidades, activa, created_at, updated_at)
-        SELECT id, numero, piso, tipo, capacidad, estado, precio_base, precio_corporativo, descripcion, amenidades, activa, created_at, updated_at
-        FROM habitaciones_old;
-      `);
-      db.exec('DROP TABLE habitaciones_old;');
-    });
-
-    migrar();
-    console.log('✅ Tabla habitaciones migrada — ya acepta cualquier tipo del catálogo');
-  }
-  } catch (err) {
-    console.error('⚠️  Migración habitaciones (quitar CHECK viejo) falló:', err.message);
-    console.error('   Usá GET /api/diag y /api/repair-habitaciones para diagnosticar y reparar manualmente.');
   }
 }
 
