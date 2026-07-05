@@ -6,14 +6,14 @@ import toast from 'react-hot-toast'
 import PrecioDual from '../components/common/PrecioDual'
 
 const REPORTES = [
-  { id: 'cierre_caja', icon: DollarSign, label: 'Cierre de Caja', desc: 'Cuadre por turno y método de pago', color: 'emerald' },
-  { id: 'libro_ventas', icon: FileBarChart, label: 'Libro de Ventas', desc: 'Ventas mensuales con desglose de impuestos', color: 'brand' },
-  { id: 'libro_huespedes', icon: Users, label: 'Libro de Huéspedes', desc: 'Registro oficial de ingresos al hotel', color: 'violet' },
+  { id: 'cierre-caja', icon: DollarSign, label: 'Cierre de Caja', desc: 'Cuadre por turno y método de pago', color: 'emerald' },
+  { id: 'libro-ventas', icon: FileBarChart, label: 'Libro de Ventas', desc: 'Ventas mensuales con desglose de impuestos', color: 'brand' },
+  { id: 'libro-huespedes', icon: Users, label: 'Libro de Huéspedes', desc: 'Registro oficial de ingresos al hotel', color: 'violet' },
   { id: 'ocupacion', icon: BarChart2, label: 'Reporte de Ocupación', desc: 'Porcentaje de ocupación por período', color: 'orange' },
 ]
 
 export default function ReportesPage() {
-  const [activo, setActivo] = useState('cierre_caja')
+  const [activo, setActivo] = useState('cierre-caja')
   const [fechaDesde, setFechaDesde] = useState(new Date().toISOString().split('T')[0])
   const [fechaHasta, setFechaHasta] = useState(new Date().toISOString().split('T')[0])
   const [datos, setDatos] = useState(null)
@@ -92,9 +92,9 @@ export default function ReportesPage() {
       {/* Resultado del reporte */}
       {datos && (
         <div className="print-only-visible">
-          {activo === 'cierre_caja' && <ReporteCierreCaja datos={datos} desde={fechaDesde} hasta={fechaHasta} />}
-          {activo === 'libro_ventas' && <ReporteLibroVentas datos={datos} desde={fechaDesde} hasta={fechaHasta} />}
-          {activo === 'libro_huespedes' && <ReporteLibroHuespedes datos={datos} desde={fechaDesde} hasta={fechaHasta} />}
+          {activo === 'cierre-caja' && <ReporteCierreCaja datos={datos} desde={fechaDesde} hasta={fechaHasta} />}
+          {activo === 'libro-ventas' && <ReporteLibroVentas datos={datos} desde={fechaDesde} hasta={fechaHasta} />}
+          {activo === 'libro-huespedes' && <ReporteLibroHuespedes datos={datos} desde={fechaDesde} hasta={fechaHasta} />}
           {activo === 'ocupacion' && <ReporteOcupacion datos={datos} desde={fechaDesde} hasta={fechaHasta} />}
         </div>
       )}

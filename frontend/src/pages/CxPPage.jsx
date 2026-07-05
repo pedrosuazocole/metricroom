@@ -94,7 +94,7 @@ export default function CxPPage() {
                   </td>
                   <td className="table-cell font-semibold text-slate-200"><PrecioDual monto={c.monto_total} size="sm" /></td>
                   <td className="table-cell">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${c.estado === 'PAGADO' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : vencido ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${c.estado === 'PAGADA' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : vencido ? 'bg-red-500/20 text-red-400 border-red-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>
                       {c.estado}
                     </span>
                   </td>

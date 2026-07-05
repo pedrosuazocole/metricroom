@@ -27,7 +27,7 @@ export default function CxCPage() {
 
   const abonar = async (e) => {
     e.preventDefault()
-    await api.post(`/cuentas-cobrar/${selectedId}/abonos`, abono)
+    await api.post(`/cuentas-cobrar/${selectedId}/abono`, abono)
     toast.success('Abono registrado')
     setShowAbono(false)
     setAbono({ monto: '', metodo_pago: 'EFECTIVO', observaciones: '' })
@@ -98,12 +98,12 @@ export default function CxCPage() {
                   <td className="table-cell text-emerald-400"><PrecioDual monto={c.monto_abonado || 0} size="sm" /></td>
                   <td className="table-cell font-bold text-white"><PrecioDual monto={c.saldo_pendiente} size="sm" /></td>
                   <td className="table-cell">
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${c.estado === 'PAGADO' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${c.estado === 'PAGADA' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>
                       {c.estado}
                     </span>
                   </td>
                   <td className="table-cell">
-                    {c.estado !== 'PAGADO' && (
+                    {c.estado !== 'PAGADA' && (
                       <button onClick={() => { setSelectedId(c.id); setShowAbono(true) }}
                         className="text-brand-400 hover:text-brand-300 text-xs px-2 py-1 rounded border border-brand-500/30">
                         Abonar

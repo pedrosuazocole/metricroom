@@ -64,7 +64,7 @@ export default function InventarioPage() {
 
   const registrarMovimiento = async (e) => {
     e.preventDefault()
-    await api.post(`/inventario/${selected.id}/movimientos`, movForm)
+    await api.post(`/inventario/${selected.id}/movimiento`, movForm)
     toast.success('Movimiento registrado')
     setShowMov(false)
     setMovForm({ tipo: 'ENTRADA', cantidad: 1, precio_unitario: '', observaciones: '' })
