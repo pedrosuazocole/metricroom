@@ -126,11 +126,12 @@ export default function FacturasPage() {
   }
 
   const calcTotales = () => {
-    let exento = 0, baseIsv = 0, baseIht = 0
+    let exento = 0, baseIsv = 0, baseIht = 0, subtotalGeneral = 0
     form.items.forEach(it => {
       const sub = (parseFloat(it.cantidad) || 0) * (parseFloat(it.precio_unitario) || 0)
       const aplicaIsv = it.aplica_isv && !huespedExento
       const aplicaIht = it.aplica_iht
+      subtotalGeneral += sub
       if (aplicaIsv) baseIsv += sub
       if (aplicaIht) baseIht += sub
       if (!aplicaIsv && !aplicaIht) exento += sub
@@ -138,7 +139,10 @@ export default function FacturasPage() {
     const isv = baseIsv * 0.15
     const iht = baseIht * 0.04
     const desc = parseFloat(form.descuento) || 0
-    return { exento, baseIsv, baseIht, isv, iht, desc, total: exento + baseIsv + baseIht + isv + iht - desc }
+    // OJO: baseIsv y baseIht son bases gravables para el desglose (se solapan
+    // a propósito en hospedaje, que paga ambos impuestos sobre el mismo monto).
+    // El total es subtotalGeneral (cada línea UNA vez) + impuestos - descuento.
+    return { exento, baseIsv, baseIht, isv, iht, desc, total: subtotalGeneral + isv + iht - desc }
   }
 
   const emitir = async (e) => {
