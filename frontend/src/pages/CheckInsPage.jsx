@@ -177,6 +177,21 @@ export default function CheckInsPage() {
     }
   }
 
+  // Agregar o quitar una noche de la estadía activa (ajusta el check-out
+  // previsto del folio, con validación de traslape en el backend).
+  const cambiarNoches = async (delta) => {
+    if (!selected?.fecha_checkout_prevista) return
+    const actual = new Date(selected.fecha_checkout_prevista.split(' ')[0].split('T')[0])
+    actual.setDate(actual.getDate() + delta)
+    const nuevaFecha = actual.toISOString().split('T')[0]
+    try {
+      await api.patch(`/checkins/${selected.id}/fecha-salida`, { fecha_checkout_prevista: nuevaFecha })
+      toast.success(delta > 0 ? 'Noche agregada' : 'Noche quitada')
+      setSelected(prev => prev ? { ...prev, fecha_checkout_prevista: nuevaFecha } : prev)
+      cargar()
+    } catch { /* toast manejado por interceptor */ }
+  }
+
   const agregarExtra = async (e) => {
     e.preventDefault()
     await api.post(`/checkins/${selected.id}/extras`, extraForm)
@@ -252,7 +267,16 @@ export default function CheckInsPage() {
               <div className="flex justify-between"><span className="text-slate-500">Empresa</span><span className="text-slate-200">{selected.empresa || '—'}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Garantía</span><span className="text-slate-200">{selected.tipo_garantia}</span></div>
               <div className="flex justify-between"><span className="text-slate-500">Check-in</span><span className="text-slate-200">{selected.fecha_checkin?.split(' ')[0]}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Check-out</span><span className="text-brand-400 font-medium">{selected.fecha_checkout_prevista?.split(' ')[0]}</span></div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Check-out</span>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => cambiarNoches(-1)} title="Quitar 1 noche"
+                    className="w-5 h-5 flex items-center justify-center rounded bg-slate-700 hover:bg-red-600/40 text-slate-300 text-sm leading-none">−</button>
+                  <span className="text-brand-400 font-medium">{selected.fecha_checkout_prevista?.split(' ')[0]}</span>
+                  <button type="button" onClick={() => cambiarNoches(1)} title="Agregar 1 noche"
+                    className="w-5 h-5 flex items-center justify-center rounded bg-slate-700 hover:bg-emerald-600/40 text-slate-300 text-sm leading-none">+</button>
+                </div>
+              </div>
             </div>
 
             {/* Extras del folio */}
