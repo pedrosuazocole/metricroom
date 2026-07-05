@@ -313,6 +313,52 @@ router.post('/:id/checkout', (req, res) => {
   }
 });
 
+// PATCH /api/checkins/:id/fecha-salida - Extender o acortar la estadía (folio activo)
+router.patch('/:id/fecha-salida', (req, res) => {
+  try {
+    const db = getDB();
+    const { fecha_checkout_prevista } = req.body;
+    if (!fecha_checkout_prevista) {
+      return res.status(400).json({ ok: false, error: 'fecha_checkout_prevista requerida' });
+    }
+
+    const checkin = db.prepare(`SELECT * FROM checkins WHERE id = ? AND estado = 'ACTIVO'`).get(req.params.id);
+    if (!checkin) return res.status(404).json({ ok: false, error: 'Check-in activo no encontrado' });
+
+    const fechaCheckinSolo = checkin.fecha_checkin.split(' ')[0].split('T')[0];
+    if (fecha_checkout_prevista <= fechaCheckinSolo) {
+      return res.status(400).json({ ok: false, error: 'La fecha de salida debe ser posterior al check-in (mínimo 1 noche)' });
+    }
+
+    // No permitir que choque con otra reserva de la misma habitación (excluyendo esta misma)
+    const conflicto = db.prepare(`
+      SELECT r.id FROM reservas r
+      WHERE r.habitacion_id = ? AND r.id != ?
+        AND r.estado NOT IN ('CANCELADA','CHECKOUT','NO_SHOW')
+        AND NOT (r.fecha_salida <= ? OR r.fecha_entrada >= ?)
+    `).get(checkin.habitacion_id, checkin.reserva_id, fechaCheckinSolo, fecha_checkout_prevista);
+    if (conflicto) {
+      return res.status(409).json({ ok: false, error: 'La habitación ya tiene otra reserva en esas fechas' });
+    }
+
+    const noches = Math.max(1, Math.round(
+      (new Date(fecha_checkout_prevista) - new Date(fechaCheckinSolo)) / 86400000
+    ));
+
+    const actualizar = db.transaction(() => {
+      db.prepare(`UPDATE checkins SET fecha_checkout_prevista = ? WHERE id = ?`)
+        .run(fecha_checkout_prevista, req.params.id);
+      db.prepare(`UPDATE reservas SET fecha_salida = ?, noches = ?, updated_at = datetime('now','localtime') WHERE id = ?`)
+        .run(fecha_checkout_prevista, noches, checkin.reserva_id);
+    });
+    actualizar();
+
+    res.json({ ok: true, message: 'Fecha de salida actualizada', data: { fecha_checkout_prevista, noches } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // POST /api/checkins/:id/extras - Agregar servicio extra al folio
 router.post('/:id/extras', (req, res) => {
   try {
