@@ -628,22 +628,23 @@ function migrarEsquemaViejo() {
   // "checkins" -> "checkins_fix_old") durante su propia migración, SQLite no siempre
   // actualiza las FOREIGN KEY de las demás tablas que ya la referenciaban — su
   // definición SQL puede quedar fosilizada apuntando literalmente al nombre viejo,
-  // aunque esa tabla temporal ya no exista. Esto se reconstruye igual que con
-  // habitaciones: RENAME + CREATE + INSERT + DROP.
+  // aunque esa tabla temporal ya no exista.
   //
   // IMPORTANTE: este bloque corre SIEMPRE en cada arranque del servidor, sin
   // importar si la migración de habitaciones de arriba falló o no — antes vivía
   // anidado por error dentro de ese catch, así que en un arranque normal (sin
   // error previo) nunca se ejecutaba y las FK fosilizadas quedaban sin reparar.
   //
-  // La detección es genérica (cualquier FK que apunte a una tabla "*_old"), no
-  // solo "habitaciones_old", porque el mismo problema se repite en cascada:
-  // reparar "checkins" puede fosilizar a su vez las FK de "facturas" y
-  // "servicios_extras" que apuntaban a checkins.
-  //
-  // Cada tabla se repara en su propio try/catch, y antes de intentar el RENAME
-  // se limpia cualquier "<tabla>_fix_old" residual de un intento anterior
-  // interrumpido — el mismo patrón defensivo que ya usamos para habitaciones.
+  // El problema es en CASCADA y de profundidad variable: reparar "checkins"
+  // (hijo de habitaciones) fosiliza a su vez la FK de "facturas" y
+  // "servicios_extras" (hijos de checkins) hacia "checkins_fix_old"; reparar
+  // "facturas" fosiliza a su vez la FK de "detalle_facturas" y "cuentas_cobrar"
+  // (hijos de facturas) hacia "facturas_fix_old" — y así podría seguir con
+  // cualquier tabla nueva que se agregue en el futuro. En vez de ir agregando
+  // un bloque a mano por cada nivel (lo que ya pasó dos veces), esto reconstruye
+  // genéricamente cualquier tabla registrada que tenga una FK fosilizada, y
+  // repite el pase completo hasta que ya no quede ninguna — así se resuelve
+  // la cascada completa de una sola vez, sin importar cuántos niveles tenga.
   const tablaExisteGenerico = (nombre) =>
     !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(nombre);
 
@@ -655,247 +656,212 @@ function migrarEsquemaViejo() {
     return fks.some(fk => fk.table.endsWith('_old'));
   };
 
-  try {
-    // 3 estados posibles para "reservas" / "reservas_fix_old":
-    //  1) reservas existe y SIN FK fosilizada, sin residuo -> nada que hacer
-    //  2) reservas existe y SIN FK fosilizada, CON residuo  -> ya migró antes,
-    //     solo limpiar el residuo huérfano
-    //  3) reservas existe CON FK fosilizada                -> reconstruir
-    //  4) reservas NO existe pero reservas_fix_old SÍ       -> la migración se
-    //     interrumpió justo después del RENAME, antes del CREATE. Hay que
-    //     COMPLETAR el proceso (crear tabla nueva + copiar datos + dropear
-    //     la vieja) — NUNCA solo borrar, o se pierden reservas reales.
-    const reservasExiste = tablaExisteGenerico('reservas');
-    const reservasOldExiste = tablaExisteGenerico('reservas_fix_old');
+  // Registro de tablas reconstruibles: nombre -> { createSQL, columnas a preservar }.
+  // IMPORTANTE: si se agrega una tabla nueva con FK hacia reservas/checkins/
+  // facturas/servicios_extras/detalle_facturas/cuentas_cobrar, agregarla aquí
+  // también (con el mismo CREATE TABLE que tiene arriba en initSchema) para que
+  // quede cubierta por este mecanismo genérico.
+  const registroTablas = {
+    reservas: {
+      columnas: ['id','codigo','huesped_id','habitacion_id','fecha_entrada','fecha_salida','noches',
+        'adultos','ninos','estado','tipo_garantia','monto_deposito','motivo_visita','empresa',
+        'cliente_corporativo_id','tarifa_aplicada','moneda','tasa_cambio','total_estimado',
+        'notas','origen','created_by','created_at','updated_at'],
+      createSQL: `
+        CREATE TABLE reservas (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          codigo TEXT NOT NULL UNIQUE,
+          huesped_id INTEGER NOT NULL,
+          habitacion_id INTEGER NOT NULL,
+          fecha_entrada TEXT NOT NULL,
+          fecha_salida TEXT NOT NULL,
+          noches INTEGER NOT NULL,
+          adultos INTEGER DEFAULT 1,
+          ninos INTEGER DEFAULT 0,
+          estado TEXT NOT NULL DEFAULT 'PENDIENTE'
+            CHECK(estado IN ('PENDIENTE','CONFIRMADA','GARANTIZADA','CHECKIN','CHECKOUT','CANCELADA','NO_SHOW')),
+          tipo_garantia TEXT CHECK(tipo_garantia IN ('EFECTIVO','TARJETA','TRANSFERENCIA','CREDITO_EMPRESA','VOUCHER')),
+          monto_deposito REAL DEFAULT 0,
+          motivo_visita TEXT CHECK(motivo_visita IN ('TURISMO','NEGOCIOS','EVENTOS','FAMILIAR','OTRO')),
+          empresa TEXT,
+          cliente_corporativo_id INTEGER,
+          tarifa_aplicada REAL NOT NULL,
+          moneda TEXT DEFAULT 'HNL' CHECK(moneda IN ('HNL','USD')),
+          tasa_cambio REAL DEFAULT 1,
+          total_estimado REAL,
+          notas TEXT,
+          origen TEXT DEFAULT 'MOSTRADOR' CHECK(origen IN ('MOSTRADOR','ONLINE','TELEFONO','AGENCIA','CORPORATIVO')),
+          created_by TEXT,
+          created_at TEXT DEFAULT (datetime('now','localtime')),
+          updated_at TEXT DEFAULT (datetime('now','localtime')),
+          FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
+          FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
+        );
+      `,
+    },
+    checkins: {
+      columnas: ['id','reserva_id','huesped_id','habitacion_id','fecha_checkin','fecha_checkout_real',
+        'fecha_checkout_prevista','estado','observaciones','atendido_por','created_at'],
+      createSQL: `
+        CREATE TABLE checkins (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          reserva_id INTEGER NOT NULL,
+          huesped_id INTEGER NOT NULL,
+          habitacion_id INTEGER NOT NULL,
+          fecha_checkin TEXT NOT NULL,
+          fecha_checkout_real TEXT,
+          fecha_checkout_prevista TEXT NOT NULL,
+          estado TEXT DEFAULT 'ACTIVO' CHECK(estado IN ('ACTIVO','CHECKOUT','CANCELADO')),
+          observaciones TEXT,
+          atendido_por TEXT,
+          created_at TEXT DEFAULT (datetime('now','localtime')),
+          FOREIGN KEY (reserva_id) REFERENCES reservas(id),
+          FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
+          FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
+        );
+      `,
+    },
+    facturas: {
+      columnas: ['id','numero_factura','cai','checkin_id','reserva_id','huesped_id','cliente_nombre',
+        'cliente_rtn','cliente_direccion','moneda','tasa_cambio','subtotal_exento',
+        'subtotal_gravado_isv','subtotal_gravado_iht','isv_15','iht_4','descuento','total',
+        'estado','metodo_pago','observaciones','impresa','enviada_email','created_by','created_at'],
+      createSQL: `
+        CREATE TABLE facturas (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          numero_factura TEXT NOT NULL UNIQUE,
+          cai TEXT NOT NULL,
+          checkin_id INTEGER,
+          reserva_id INTEGER,
+          huesped_id INTEGER NOT NULL,
+          cliente_nombre TEXT NOT NULL,
+          cliente_rtn TEXT,
+          cliente_direccion TEXT,
+          moneda TEXT DEFAULT 'HNL',
+          tasa_cambio REAL DEFAULT 1,
+          subtotal_exento REAL DEFAULT 0,
+          subtotal_gravado_isv REAL DEFAULT 0,
+          subtotal_gravado_iht REAL DEFAULT 0,
+          isv_15 REAL DEFAULT 0,
+          iht_4 REAL DEFAULT 0,
+          descuento REAL DEFAULT 0,
+          total REAL NOT NULL,
+          estado TEXT DEFAULT 'EMITIDA' CHECK(estado IN ('EMITIDA','ANULADA','CREDITO')),
+          metodo_pago TEXT CHECK(metodo_pago IN ('EFECTIVO','TARJETA','TRANSFERENCIA','CREDITO','MIXTO')),
+          observaciones TEXT,
+          impresa INTEGER DEFAULT 0,
+          enviada_email INTEGER DEFAULT 0,
+          created_by TEXT,
+          created_at TEXT DEFAULT (datetime('now','localtime')),
+          FOREIGN KEY (checkin_id) REFERENCES checkins(id),
+          FOREIGN KEY (huesped_id) REFERENCES huespedes(id)
+        );
+      `,
+    },
+    servicios_extras: {
+      columnas: ['id','checkin_id','descripcion','cantidad','precio_unitario','subtotal','categoria','fecha'],
+      createSQL: `
+        CREATE TABLE servicios_extras (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          checkin_id INTEGER NOT NULL,
+          descripcion TEXT NOT NULL,
+          cantidad REAL DEFAULT 1,
+          precio_unitario REAL NOT NULL,
+          subtotal REAL NOT NULL,
+          categoria TEXT DEFAULT 'SERVICIO'
+            CHECK(categoria IN ('MINIBAR','RESTAURANTE','LAVANDERIA','TELEFONO','TRANSPORTE','OTROS','SERVICIO')),
+          fecha TEXT DEFAULT (datetime('now','localtime')),
+          FOREIGN KEY (checkin_id) REFERENCES checkins(id)
+        );
+      `,
+    },
+    detalle_facturas: {
+      columnas: ['id','factura_id','descripcion','cantidad','precio_unitario','aplica_isv','aplica_iht','subtotal'],
+      createSQL: `
+        CREATE TABLE detalle_facturas (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          factura_id INTEGER NOT NULL,
+          descripcion TEXT NOT NULL,
+          cantidad REAL DEFAULT 1,
+          precio_unitario REAL NOT NULL,
+          aplica_isv INTEGER DEFAULT 0,
+          aplica_iht INTEGER DEFAULT 0,
+          subtotal REAL NOT NULL,
+          FOREIGN KEY (factura_id) REFERENCES facturas(id)
+        );
+      `,
+    },
+    cuentas_cobrar: {
+      columnas: ['id','factura_id','cliente_id','monto_original','saldo_pendiente','fecha_vencimiento','estado','created_at'],
+      createSQL: `
+        CREATE TABLE cuentas_cobrar (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          factura_id INTEGER NOT NULL,
+          cliente_id INTEGER NOT NULL,
+          monto_original REAL NOT NULL,
+          saldo_pendiente REAL NOT NULL,
+          fecha_vencimiento TEXT,
+          estado TEXT DEFAULT 'PENDIENTE' CHECK(estado IN ('PENDIENTE','PARCIAL','PAGADA','VENCIDA')),
+          created_at TEXT DEFAULT (datetime('now','localtime')),
+          FOREIGN KEY (factura_id) REFERENCES facturas(id),
+          FOREIGN KEY (cliente_id) REFERENCES clientes_corporativos(id)
+        );
+      `,
+    },
+  };
 
-    if (reservasExiste && !fkFosilizada('reservas') && reservasOldExiste) {
-      // Caso 2: ya migró exitosamente antes, solo quedó el residuo por limpiar
-      console.log('🧹 Limpiando reservas_fix_old residual (la migración ya había completado)...');
-      db.exec('DROP TABLE reservas_fix_old;');
+  // Reconstruye una tabla del registro si su FK está fosilizada, o si quedó
+  // a medio migrar (existe "<tabla>_fix_old" pero no la tabla final). Si ya
+  // está sana pero quedó un residuo huérfano de una migración anterior que sí
+  // completó, solo limpia ese residuo. Devuelve true si reconstruyó la tabla
+  // (para saber si hace falta otro pase, por el efecto cascada).
+  const repararSiFosilizada = (nombreTabla) => {
+    const { createSQL, columnas } = registroTablas[nombreTabla];
+    const nombreOld = `${nombreTabla}_fix_old`;
+    const existe = tablaExisteGenerico(nombreTabla);
+    const oldExiste = tablaExisteGenerico(nombreOld);
+
+    if (existe && !fkFosilizada(nombreTabla) && oldExiste) {
+      console.log(`🧹 Limpiando ${nombreOld} residual (la migración ya había completado)...`);
+      db.exec(`DROP TABLE ${nombreOld};`);
+      return false;
     }
 
-    if ((reservasExiste && fkFosilizada('reservas')) || (!reservasExiste && reservasOldExiste)) {
-      // Caso 3 o Caso 4: hay que (re)construir la tabla nueva
-      console.log('🔧 Reconstruyendo tabla reservas (FK fosilizada o migración interrumpida a medias)...');
-
+    if ((existe && fkFosilizada(nombreTabla)) || (!existe && oldExiste)) {
+      console.log(`🔧 Reconstruyendo tabla ${nombreTabla} (FK fosilizada o migración interrumpida a medias)...`);
       const migrar = db.transaction(() => {
-        // Si "reservas" todavía existe (Caso 3), renombrarla primero.
-        // Si no existe (Caso 4), ya está renombrada de un intento anterior.
-        if (reservasExiste) {
-          db.exec('ALTER TABLE reservas RENAME TO reservas_fix_old;');
-        }
-        db.exec(`
-          CREATE TABLE reservas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            codigo TEXT NOT NULL UNIQUE,
-            huesped_id INTEGER NOT NULL,
-            habitacion_id INTEGER NOT NULL,
-            fecha_entrada TEXT NOT NULL,
-            fecha_salida TEXT NOT NULL,
-            noches INTEGER NOT NULL,
-            adultos INTEGER DEFAULT 1,
-            ninos INTEGER DEFAULT 0,
-            estado TEXT NOT NULL DEFAULT 'PENDIENTE'
-              CHECK(estado IN ('PENDIENTE','CONFIRMADA','GARANTIZADA','CHECKIN','CHECKOUT','CANCELADA','NO_SHOW')),
-            tipo_garantia TEXT CHECK(tipo_garantia IN ('EFECTIVO','TARJETA','TRANSFERENCIA','CREDITO_EMPRESA','VOUCHER')),
-            monto_deposito REAL DEFAULT 0,
-            motivo_visita TEXT CHECK(motivo_visita IN ('TURISMO','NEGOCIOS','EVENTOS','FAMILIAR','OTRO')),
-            empresa TEXT,
-            cliente_corporativo_id INTEGER,
-            tarifa_aplicada REAL NOT NULL,
-            moneda TEXT DEFAULT 'HNL' CHECK(moneda IN ('HNL','USD')),
-            tasa_cambio REAL DEFAULT 1,
-            total_estimado REAL,
-            notas TEXT,
-            origen TEXT DEFAULT 'MOSTRADOR' CHECK(origen IN ('MOSTRADOR','ONLINE','TELEFONO','AGENCIA','CORPORATIVO')),
-            created_by TEXT,
-            created_at TEXT DEFAULT (datetime('now','localtime')),
-            updated_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
-            FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
-          );
-        `);
-        // Insertar solo las columnas que existían en la tabla vieja (por si difiere)
-        const colsViejas = db.prepare('PRAGMA table_info(reservas_fix_old)').all().map(c => c.name);
-        const colsComunes = colsViejas.filter(c =>
-          ['id','codigo','huesped_id','habitacion_id','fecha_entrada','fecha_salida','noches',
-           'adultos','ninos','estado','tipo_garantia','monto_deposito','motivo_visita','empresa',
-           'cliente_corporativo_id','tarifa_aplicada','moneda','tasa_cambio','total_estimado',
-           'notas','origen','created_by','created_at','updated_at'].includes(c)
-        ).join(', ');
-        db.exec(`INSERT INTO reservas (${colsComunes}) SELECT ${colsComunes} FROM reservas_fix_old;`);
-        db.exec('DROP TABLE reservas_fix_old;');
+        if (existe) db.exec(`ALTER TABLE ${nombreTabla} RENAME TO ${nombreOld};`);
+        db.exec(createSQL);
+        const colsViejas = db.prepare(`PRAGMA table_info(${nombreOld})`).all().map(c => c.name);
+        const colsComunes = colsViejas.filter(c => columnas.includes(c)).join(', ');
+        db.exec(`INSERT INTO ${nombreTabla} (${colsComunes}) SELECT ${colsComunes} FROM ${nombreOld};`);
+        db.exec(`DROP TABLE ${nombreOld};`);
       });
       migrar();
-      console.log('✅ Tabla reservas reconstruida con FK correcta — datos preservados');
+      console.log(`✅ Tabla ${nombreTabla} reconstruida con FK correcta — datos preservados`);
+      return true;
     }
-  } catch (err) {
-    console.error('⚠️  Migración FK fosilizada (reservas) falló:', err.message);
-  }
+    return false;
+  };
 
-  // checkins se repara en su PROPIO try/catch — mismo patrón de 4 casos que reservas.
-  try {
-    const checkinsExiste = tablaExisteGenerico('checkins');
-    const checkinsOldExiste = tablaExisteGenerico('checkins_fix_old');
+  // Orden de padre -> hijo (importa poco para la corrección ya que cada tabla
+  // se reconstruye con su CREATE TABLE completo y correcto de todas formas,
+  // pero mantenerlo así hace los logs más legibles de leer de arriba a abajo).
+  const ORDEN_TABLAS_FK = ['reservas', 'checkins', 'facturas', 'servicios_extras', 'detalle_facturas', 'cuentas_cobrar'];
 
-    if (checkinsExiste && !fkFosilizada('checkins') && checkinsOldExiste) {
-      console.log('🧹 Limpiando checkins_fix_old residual (la migración ya había completado)...');
-      db.exec('DROP TABLE checkins_fix_old;');
+  // Repetir el pase completo hasta que ya no haya ninguna reconstrucción:
+  // esto es lo que resuelve la cascada de cualquier profundidad en una sola
+  // pasada de arranque, sin tener que predecir cuántos niveles tiene.
+  for (let pase = 0; pase < 5; pase++) {
+    let huboReconstruccion = false;
+    for (const tabla of ORDEN_TABLAS_FK) {
+      try {
+        if (repararSiFosilizada(tabla)) huboReconstruccion = true;
+      } catch (err) {
+        console.error(`⚠️  Migración FK fosilizada (${tabla}) falló:`, err.message);
+      }
     }
-
-    if ((checkinsExiste && fkFosilizada('checkins')) || (!checkinsExiste && checkinsOldExiste)) {
-      console.log('🔧 Reconstruyendo tabla checkins (FK fosilizada o migración interrumpida a medias)...');
-
-      const migrar = db.transaction(() => {
-        if (checkinsExiste) {
-          db.exec('ALTER TABLE checkins RENAME TO checkins_fix_old;');
-        }
-        db.exec(`
-          CREATE TABLE checkins (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            reserva_id INTEGER NOT NULL,
-            huesped_id INTEGER NOT NULL,
-            habitacion_id INTEGER NOT NULL,
-            fecha_checkin TEXT NOT NULL,
-            fecha_checkout_real TEXT,
-            fecha_checkout_prevista TEXT NOT NULL,
-            estado TEXT DEFAULT 'ACTIVO' CHECK(estado IN ('ACTIVO','CHECKOUT','CANCELADO')),
-            observaciones TEXT,
-            atendido_por TEXT,
-            created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (reserva_id) REFERENCES reservas(id),
-            FOREIGN KEY (huesped_id) REFERENCES huespedes(id),
-            FOREIGN KEY (habitacion_id) REFERENCES habitaciones(id)
-          );
-        `);
-        const colsViejas = db.prepare('PRAGMA table_info(checkins_fix_old)').all().map(c => c.name);
-        const colsComunes = colsViejas.filter(c =>
-          ['id','reserva_id','huesped_id','habitacion_id','fecha_checkin','fecha_checkout_real',
-           'fecha_checkout_prevista','estado','observaciones','atendido_por','created_at'].includes(c)
-        ).join(', ');
-        db.exec(`INSERT INTO checkins (${colsComunes}) SELECT ${colsComunes} FROM checkins_fix_old;`);
-        db.exec('DROP TABLE checkins_fix_old;');
-      });
-      migrar();
-      console.log('✅ Tabla checkins reconstruida con FK correcta — datos preservados');
-    }
-  } catch (err) {
-    console.error('⚠️  Migración FK fosilizada (checkins) falló:', err.message);
-  }
-
-  // ── Migración: FK fosilizada en facturas/servicios_extras (referencian checkins) ──
-  // Efecto en cascada del bloque anterior: si "checkins" se renombró alguna vez
-  // a "checkins_fix_old" durante SU propia reparación, las tablas que a su vez
-  // referencian a checkins (facturas, servicios_extras) pueden haber quedado
-  // fosilizadas apuntando a "checkins_fix_old" — que es exactamente el error
-  // "no such table: main.checkins_fix_old" que se ve al hacer Check-Out
-  // (el checkout inserta en facturas y lee servicios_extras).
-  try {
-    const facturasExiste = tablaExisteGenerico('facturas');
-    const facturasOldExiste = tablaExisteGenerico('facturas_fix_old');
-
-    if (facturasExiste && !fkFosilizada('facturas') && facturasOldExiste) {
-      console.log('🧹 Limpiando facturas_fix_old residual (la migración ya había completado)...');
-      db.exec('DROP TABLE facturas_fix_old;');
-    }
-
-    if ((facturasExiste && fkFosilizada('facturas')) || (!facturasExiste && facturasOldExiste)) {
-      console.log('🔧 Reconstruyendo tabla facturas (FK fosilizada hacia checkins_fix_old)...');
-
-      const migrar = db.transaction(() => {
-        if (facturasExiste) {
-          db.exec('ALTER TABLE facturas RENAME TO facturas_fix_old;');
-        }
-        db.exec(`
-          CREATE TABLE facturas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            numero_factura TEXT NOT NULL UNIQUE,
-            cai TEXT NOT NULL,
-            checkin_id INTEGER,
-            reserva_id INTEGER,
-            huesped_id INTEGER NOT NULL,
-            cliente_nombre TEXT NOT NULL,
-            cliente_rtn TEXT,
-            cliente_direccion TEXT,
-            moneda TEXT DEFAULT 'HNL',
-            tasa_cambio REAL DEFAULT 1,
-            subtotal_exento REAL DEFAULT 0,
-            subtotal_gravado_isv REAL DEFAULT 0,
-            subtotal_gravado_iht REAL DEFAULT 0,
-            isv_15 REAL DEFAULT 0,
-            iht_4 REAL DEFAULT 0,
-            descuento REAL DEFAULT 0,
-            total REAL NOT NULL,
-            estado TEXT DEFAULT 'EMITIDA' CHECK(estado IN ('EMITIDA','ANULADA','CREDITO')),
-            metodo_pago TEXT CHECK(metodo_pago IN ('EFECTIVO','TARJETA','TRANSFERENCIA','CREDITO','MIXTO')),
-            observaciones TEXT,
-            impresa INTEGER DEFAULT 0,
-            enviada_email INTEGER DEFAULT 0,
-            created_by TEXT,
-            created_at TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (checkin_id) REFERENCES checkins(id),
-            FOREIGN KEY (huesped_id) REFERENCES huespedes(id)
-          );
-        `);
-        const colsViejas = db.prepare('PRAGMA table_info(facturas_fix_old)').all().map(c => c.name);
-        const colsComunes = colsViejas.filter(c =>
-          ['id','numero_factura','cai','checkin_id','reserva_id','huesped_id','cliente_nombre',
-           'cliente_rtn','cliente_direccion','moneda','tasa_cambio','subtotal_exento',
-           'subtotal_gravado_isv','subtotal_gravado_iht','isv_15','iht_4','descuento','total',
-           'estado','metodo_pago','observaciones','impresa','enviada_email','created_by','created_at'].includes(c)
-        ).join(', ');
-        db.exec(`INSERT INTO facturas (${colsComunes}) SELECT ${colsComunes} FROM facturas_fix_old;`);
-        db.exec('DROP TABLE facturas_fix_old;');
-      });
-      migrar();
-      console.log('✅ Tabla facturas reconstruida con FK correcta — datos preservados');
-    }
-  } catch (err) {
-    console.error('⚠️  Migración FK fosilizada (facturas) falló:', err.message);
-  }
-
-  try {
-    const extrasExiste = tablaExisteGenerico('servicios_extras');
-    const extrasOldExiste = tablaExisteGenerico('servicios_extras_fix_old');
-
-    if (extrasExiste && !fkFosilizada('servicios_extras') && extrasOldExiste) {
-      console.log('🧹 Limpiando servicios_extras_fix_old residual (la migración ya había completado)...');
-      db.exec('DROP TABLE servicios_extras_fix_old;');
-    }
-
-    if ((extrasExiste && fkFosilizada('servicios_extras')) || (!extrasExiste && extrasOldExiste)) {
-      console.log('🔧 Reconstruyendo tabla servicios_extras (FK fosilizada hacia checkins_fix_old)...');
-
-      const migrar = db.transaction(() => {
-        if (extrasExiste) {
-          db.exec('ALTER TABLE servicios_extras RENAME TO servicios_extras_fix_old;');
-        }
-        db.exec(`
-          CREATE TABLE servicios_extras (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            checkin_id INTEGER NOT NULL,
-            descripcion TEXT NOT NULL,
-            cantidad REAL DEFAULT 1,
-            precio_unitario REAL NOT NULL,
-            subtotal REAL NOT NULL,
-            categoria TEXT DEFAULT 'SERVICIO'
-              CHECK(categoria IN ('MINIBAR','RESTAURANTE','LAVANDERIA','TELEFONO','TRANSPORTE','OTROS','SERVICIO')),
-            fecha TEXT DEFAULT (datetime('now','localtime')),
-            FOREIGN KEY (checkin_id) REFERENCES checkins(id)
-          );
-        `);
-        const colsViejas = db.prepare('PRAGMA table_info(servicios_extras_fix_old)').all().map(c => c.name);
-        const colsComunes = colsViejas.filter(c =>
-          ['id','checkin_id','descripcion','cantidad','precio_unitario','subtotal','categoria','fecha'].includes(c)
-        ).join(', ');
-        db.exec(`INSERT INTO servicios_extras (${colsComunes}) SELECT ${colsComunes} FROM servicios_extras_fix_old;`);
-        db.exec('DROP TABLE servicios_extras_fix_old;');
-      });
-      migrar();
-      console.log('✅ Tabla servicios_extras reconstruida con FK correcta — datos preservados');
-    }
-  } catch (err) {
-    console.error('⚠️  Migración FK fosilizada (servicios_extras) falló:', err.message);
+    if (!huboReconstruccion) break;
   }
 }
 
