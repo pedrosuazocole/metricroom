@@ -35,6 +35,7 @@ export default function CheckInsPage() {
   const [facturaCheckout, setFacturaCheckout] = useState(null)
   const [showHojaRecepcion, setShowHojaRecepcion] = useState(false)
   const [hojaDetalle, setHojaDetalle] = useState(null)
+  const [autoPrintHoja, setAutoPrintHoja] = useState(false)
 
   const cargar = async () => {
     setLoading(true)
@@ -91,9 +92,10 @@ export default function CheckInsPage() {
     await cargarExtras(c.id)
   }
 
-  const abrirHojaRecepcion = async (checkinId) => {
+  const abrirHojaRecepcion = async (checkinId, auto = false) => {
     const r = await api.get(`/checkins/${checkinId}`)
     setHojaDetalle(r.data.data)
+    setAutoPrintHoja(auto)
     setShowHojaRecepcion(true)
   }
 
@@ -109,10 +111,13 @@ export default function CheckInsPage() {
   const doCheckinDesdeReserva = async (e) => {
     e.preventDefault()
     if (!reservaId) return toast.error('Seleccioná una reserva')
-    await api.post('/checkins', { reserva_id: reservaId })
-    toast.success('Check-in realizado exitosamente 🎉')
-    setShowCheckinModal(false)
-    cargar()
+    try {
+      const r = await api.post('/checkins', { reserva_id: reservaId })
+      toast.success('Check-in realizado exitosamente 🎉')
+      setShowCheckinModal(false)
+      await abrirHojaRecepcion(r.data.data.checkin_id, true)
+      cargar()
+    } catch { /* toast manejado por interceptor */ }
   }
 
   // Check-in directo (walk-in): crea la reserva del día y el check-in en un solo paso
@@ -134,9 +139,10 @@ export default function CheckInsPage() {
         huesped_id, habitacion_id, fecha_entrada, fecha_salida,
         tarifa_aplicada, tipo_garantia, origen: 'MOSTRADOR',
       })
-      await api.post('/checkins', { reserva_id: rRes.data.data.id })
+      const rCheckin = await api.post('/checkins', { reserva_id: rRes.data.data.id })
       toast.success('Check-in directo realizado exitosamente 🎉')
       setShowCheckinModal(false)
+      await abrirHojaRecepcion(rCheckin.data.data.checkin_id, true)
       cargar()
     } catch { /* toast manejado por interceptor */ }
   }
@@ -470,14 +476,18 @@ export default function CheckInsPage() {
       )}
       {/* Modal: Hoja de Recepción imprimible (formato Hotel Las Cascadas) */}
       {showHojaRecepcion && hojaDetalle && (
-        <HojaRecepcionModal detalle={hojaDetalle} onClose={() => setShowHojaRecepcion(false)} />
+        <HojaRecepcionModal
+          detalle={hojaDetalle}
+          autoPrint={autoPrintHoja}
+          onClose={() => { setShowHojaRecepcion(false); setAutoPrintHoja(false) }}
+        />
       )}
     </div>
   )
 }
 
 // ─── Hoja de Recepción — formato basado en hoja física de referencia ──────────
-function HojaRecepcionModal({ detalle, onClose }) {
+function HojaRecepcionModal({ detalle, onClose, autoPrint = false }) {
   const handlePrint = () => {
     const el = document.getElementById('hoja-recepcion-print')
     const win = window.open('', '_blank', 'width=850,height=1000')
@@ -495,6 +505,13 @@ function HojaRecepcionModal({ detalle, onClose }) {
     win.document.close()
     setTimeout(() => win.print(), 350)
   }
+
+  // Recién hecho el check-in: imprimir la hoja de recepción automáticamente,
+  // sin que el recepcionista tenga que buscarla y darle clic a "Imprimir".
+  // El modal igual queda abierto por si necesita reimprimir o revisar algo.
+  useEffect(() => {
+    if (autoPrint) handlePrint()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const h = detalle.hotel || {}
   const fechaImpresion = new Date()
