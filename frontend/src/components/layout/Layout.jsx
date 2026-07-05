@@ -94,13 +94,14 @@ export default function Layout() {
 
       {/* Overlay oscuro en móvil cuando el sidebar está abierto */}
       {open && (
-        <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setOpen(false)} />
+        <div className="no-print fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setOpen(false)} />
       )}
 
       {/* Sidebar */}
       <aside
         ref={sidebarRef}
         className={[
+          'no-print',
           'flex flex-col bg-slate-800 border-r border-slate-700/50 transition-all duration-200 z-40',
           'fixed inset-y-0 left-0 w-64',
           'lg:static lg:translate-x-0',
@@ -174,7 +175,7 @@ export default function Layout() {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
         {/* Topbar */}
-        <header className="h-14 flex items-center gap-3 px-4 border-b border-slate-700/50 bg-slate-800/30 flex-shrink-0">
+        <header className="no-print h-14 flex items-center gap-3 px-4 border-b border-slate-700/50 bg-slate-800/30 flex-shrink-0">
           <button onClick={() => setOpen(!open)}
             className="text-slate-400 hover:text-slate-200 transition-colors flex-shrink-0 p-1">
             <Menu className="w-5 h-5" />
