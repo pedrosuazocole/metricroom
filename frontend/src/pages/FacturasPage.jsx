@@ -26,6 +26,7 @@ export default function FacturasPage() {
   const { tasaVenta, tieneTasa } = useTasaCambio() || {}
   const [facturas, setFacturas] = useState([])
   const [huespedes, setHuespedes] = useState([])
+  const [clientesCorp, setClientesCorp] = useState([])
   const [sarConfig, setSarConfig] = useState(null)
   const [showEmitir, setShowEmitir] = useState(false)
   const [showVista, setShowVista] = useState(false)
@@ -36,18 +37,21 @@ export default function FacturasPage() {
   const [checkinOrigenId, setCheckinOrigenId] = useState(null)
   const [form, setForm] = useState({
     huesped_id:'', cliente_nombre:'', cliente_rtn:'', cliente_direccion:'',
+    cliente_corporativo_id:'',
     metodo_pago:'EFECTIVO', moneda:'HNL', tasa_cambio:1, descuento:0, observaciones:'',
     items: [{ ...ITEM_INIT }],
   })
 
   const cargar = async () => {
-    const [f, h, sar] = await Promise.all([
+    const [f, h, c, sar] = await Promise.all([
       api.get('/facturas'),
       api.get('/huespedes', { params: { limit: 200 } }),
+      api.get('/clientes'),
       api.get('/facturas/sar/config').catch(() => ({ data: { data: null } })),
     ])
     setFacturas(f.data.data || [])
     setHuespedes(h.data.data || [])
+    setClientesCorp(c.data.data || [])
     setSarConfig(sar.data.data)
   }
 
@@ -94,6 +98,7 @@ export default function FacturasPage() {
           huesped_id: ci.huesped_id,
           cliente_nombre: `${ci.nombres} ${ci.apellidos}`,
           cliente_rtn: ci.rtn || '',
+          cliente_corporativo_id: ci.cliente_corporativo_id || '',
           items: itemsPrecargados,
         }))
         setHuespedExento(!!ci.exento_isv)
@@ -149,6 +154,9 @@ export default function FacturasPage() {
     e.preventDefault()
     const { total } = calcTotales()
     if (total <= 0) return toast.error('El total debe ser mayor a cero')
+    if (form.metodo_pago === 'CREDITO' && !form.cliente_corporativo_id) {
+      return toast.error('Para facturar al crédito, seleccioná un Cliente Corporativo')
+    }
     const rFactura = await api.post('/facturas', {
       ...form,
       checkin_id: checkinOrigenId || null, // vincula la factura al check-in de origen (evita duplicados al completar el Check-Out)
@@ -163,7 +171,7 @@ export default function FacturasPage() {
 
     const origenCheckin = checkinOrigenId
     setShowEmitir(false)
-    setForm({ huesped_id:'', cliente_nombre:'', cliente_rtn:'', cliente_direccion:'', metodo_pago:'EFECTIVO', moneda:'HNL', tasa_cambio:1, descuento:0, observaciones:'', items: [{ ...ITEM_INIT }] })
+    setForm({ huesped_id:'', cliente_nombre:'', cliente_rtn:'', cliente_direccion:'', cliente_corporativo_id:'', metodo_pago:'EFECTIVO', moneda:'HNL', tasa_cambio:1, descuento:0, observaciones:'', items: [{ ...ITEM_INIT }] })
     setHuespedExento(false)
     setCheckinOrigenId(null)
     cargar()
@@ -372,6 +380,16 @@ export default function FacturasPage() {
                   <MoneyInput valueHNL={form.descuento} onChange={val => setForm(p=>({...p,descuento:val}))} placeholder="0.00" />
                 </div>
               </div>
+
+              {form.metodo_pago === 'CREDITO' && (
+                <div>
+                  <label className="label">Cliente Corporativo * <span className="text-slate-500 font-normal">(requerido para facturar al crédito — así aparece en Cuentas por Cobrar)</span></label>
+                  <select value={form.cliente_corporativo_id} onChange={e=>setForm(p=>({...p,cliente_corporativo_id:e.target.value}))} className="input-field" required>
+                    <option value="">Seleccionar cliente corporativo...</option>
+                    {clientesCorp.map(c => <option key={c.id} value={c.id}>{c.razon_social} — {c.dias_credito} días de crédito</option>)}
+                  </select>
+                </div>
+              )}
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setShowEmitir(false)} className="btn-secondary">Cancelar</button>
                 <button type="submit" className="btn-primary" disabled={!sarConfig}><FileText className="w-4 h-4" /> Emitir Factura</button>
