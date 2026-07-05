@@ -331,6 +331,54 @@ function initSchema() {
     );
 
     -- =============================================
+    -- TABLA: bancos
+    -- =============================================
+    CREATE TABLE IF NOT EXISTS bancos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL UNIQUE,
+      codigo TEXT,
+      tipo TEXT DEFAULT 'NACIONAL',
+      pais TEXT DEFAULT 'Honduras',
+      activo INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+
+    -- =============================================
+    -- TABLA: cuentas_bancarias
+    -- =============================================
+    CREATE TABLE IF NOT EXISTS cuentas_bancarias (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      banco_id INTEGER NOT NULL,
+      numero_cuenta TEXT NOT NULL,
+      tipo_cuenta TEXT DEFAULT 'CORRIENTE' CHECK(tipo_cuenta IN ('CORRIENTE','AHORRO')),
+      moneda TEXT DEFAULT 'HNL' CHECK(moneda IN ('HNL','USD')),
+      nombre_titular TEXT NOT NULL,
+      rtn_titular TEXT,
+      saldo_inicial REAL DEFAULT 0,
+      saldo_actual REAL DEFAULT 0,
+      descripcion TEXT,
+      activa INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY (banco_id) REFERENCES bancos(id)
+    );
+
+    -- =============================================
+    -- TABLA: movimientos_bancarios
+    -- =============================================
+    CREATE TABLE IF NOT EXISTS movimientos_bancarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cuenta_id INTEGER NOT NULL,
+      tipo TEXT NOT NULL CHECK(tipo IN ('DEPOSITO','RETIRO','TRANSFERENCIA','COMISION','INTERES','AJUSTE')),
+      monto REAL NOT NULL,
+      descripcion TEXT NOT NULL,
+      referencia TEXT,
+      fecha TEXT DEFAULT (date('now','localtime')),
+      saldo_despues REAL,
+      created_at TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY (cuenta_id) REFERENCES cuentas_bancarias(id)
+    );
+
+    -- =============================================
     -- TABLA: inventario
     -- =============================================
     CREATE TABLE IF NOT EXISTS inventario (
