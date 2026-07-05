@@ -70,10 +70,40 @@
   min-width: 100%;
 }
 
-/* ── Print ── */
+/* ── Print ──
+   Tres problemas resueltos acá:
+   1) El sidebar/topbar de la app no se ocultaban al imprimir (les falta la
+      clase .no-print — se agrega en Layout.jsx).
+   2) El layout usa altura fija + scroll interno (h-screen / overflow-hidden)
+      para que la app quepa en pantalla; eso mismo corta el contenido a una
+      sola hoja al imprimir. Se libera la altura/overflow solo en modo print.
+   3) El tema oscuro (fondos oscuros, texto claro) es ilegible en papel blanco;
+      se fuerza texto oscuro / fondos blancos dentro del área imprimible. */
 @media print {
   .no-print { display: none !important; }
-  body { background: white !important; color: black !important; }
+  html, body, #root { height: auto !important; overflow: visible !important; background: white !important; }
+  .flex.h-screen { height: auto !important; overflow: visible !important; }
+  main { overflow: visible !important; height: auto !important; }
+
+  .print-only-visible { background: white !important; }
+  .print-only-visible .card {
+    background: white !important;
+    border: 1px solid #ddd !important;
+    box-shadow: none !important;
+    color: #111 !important;
+    break-inside: avoid;
+  }
+  .print-only-visible .text-white,
+  .print-only-visible .text-slate-100,
+  .print-only-visible .text-slate-200,
+  .print-only-visible .text-slate-300,
+  .print-only-visible .text-slate-400 { color: #111 !important; }
+  .print-only-visible .text-slate-500,
+  .print-only-visible .text-slate-600 { color: #555 !important; }
+  .print-only-visible [class*="bg-"] { background: transparent !important; }
+  .print-only-visible [class*="border-"] { border-color: #ddd !important; }
+  .print-only-visible table { break-inside: auto; }
+  .print-only-visible tr { break-inside: avoid; }
 }
 
 /* ── Mejoras touch para móvil ── */
