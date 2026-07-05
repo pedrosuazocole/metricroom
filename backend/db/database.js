@@ -671,6 +671,34 @@ function migrarEsquemaViejo() {
     console.error('   Usá GET /api/diag y /api/repair-habitaciones para diagnosticar y reparar manualmente.');
   }
 
+  // ── Migración: columnas para conectar Facturación/CxP con Bancos ──
+  // Solo agrega columnas nuevas (ALTER TABLE ADD COLUMN) — no reconstruye
+  // ninguna tabla, así que no hay riesgo de fosilizar FK de otras tablas.
+  // Idempotente: revisa si la columna ya existe antes de intentar agregarla.
+  try {
+    const colsFacturas = db.prepare("PRAGMA table_info(facturas)").all().map(c => c.name);
+    if (!colsFacturas.includes('cuenta_bancaria_id')) {
+      db.exec('ALTER TABLE facturas ADD COLUMN cuenta_bancaria_id INTEGER REFERENCES cuentas_bancarias(id);');
+      console.log('✅ Columna cuenta_bancaria_id agregada a facturas');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración cuenta_bancaria_id en facturas falló:', err.message);
+  }
+
+  try {
+    const colsCxP = db.prepare("PRAGMA table_info(cuentas_pagar)").all().map(c => c.name);
+    if (!colsCxP.includes('cuenta_bancaria_id')) {
+      db.exec('ALTER TABLE cuentas_pagar ADD COLUMN cuenta_bancaria_id INTEGER REFERENCES cuentas_bancarias(id);');
+      console.log('✅ Columna cuenta_bancaria_id agregada a cuentas_pagar');
+    }
+    if (!colsCxP.includes('metodo_pago')) {
+      db.exec("ALTER TABLE cuentas_pagar ADD COLUMN metodo_pago TEXT;");
+      console.log('✅ Columna metodo_pago agregada a cuentas_pagar');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración columnas bancarias en cuentas_pagar falló:', err.message);
+  }
+
   // ── Migración: FK fosilizada en tablas hijas tras el RENAME de su tabla padre ──
   // Cuando una tabla se renombra temporalmente (ej. "habitaciones" -> "habitaciones_old",
   // "checkins" -> "checkins_fix_old") durante su propia migración, SQLite no siempre
