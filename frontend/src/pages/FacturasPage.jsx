@@ -149,7 +149,7 @@ export default function FacturasPage() {
     e.preventDefault()
     const { total } = calcTotales()
     if (total <= 0) return toast.error('El total debe ser mayor a cero')
-    await api.post('/facturas', {
+    const rFactura = await api.post('/facturas', {
       ...form,
       checkin_id: checkinOrigenId || null, // vincula la factura al check-in de origen (evita duplicados al completar el Check-Out)
       forzar_exento_isv: huespedExento,
@@ -159,6 +159,7 @@ export default function FacturasPage() {
         precio_unitario: parseFloat(it.precio_unitario),
       })),
     })
+    const facturaId = rFactura.data.data.id
 
     const origenCheckin = checkinOrigenId
     setShowEmitir(false)
@@ -196,6 +197,11 @@ export default function FacturasPage() {
     } else {
       toast.success('Factura emitida exitosamente')
     }
+
+    // Abrir la factura directamente en la Vista Previa, lista para imprimir,
+    // en vez de dejar que el usuario tenga que buscarla en la lista y darle
+    // clic al ícono de "Ver e imprimir".
+    verDetalle(facturaId)
   }
 
   const verDetalle = async (id) => {
