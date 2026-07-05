@@ -27,6 +27,7 @@ export default function FacturasPage() {
   const [facturas, setFacturas] = useState([])
   const [huespedes, setHuespedes] = useState([])
   const [clientesCorp, setClientesCorp] = useState([])
+  const [cuentasBancarias, setCuentasBancarias] = useState([])
   const [sarConfig, setSarConfig] = useState(null)
   const [showEmitir, setShowEmitir] = useState(false)
   const [showVista, setShowVista] = useState(false)
@@ -37,21 +38,23 @@ export default function FacturasPage() {
   const [checkinOrigenId, setCheckinOrigenId] = useState(null)
   const [form, setForm] = useState({
     huesped_id:'', cliente_nombre:'', cliente_rtn:'', cliente_direccion:'',
-    cliente_corporativo_id:'',
+    cliente_corporativo_id:'', cuenta_bancaria_id:'',
     metodo_pago:'EFECTIVO', moneda:'HNL', tasa_cambio:1, descuento:0, observaciones:'',
     items: [{ ...ITEM_INIT }],
   })
 
   const cargar = async () => {
-    const [f, h, c, sar] = await Promise.all([
+    const [f, h, c, cb, sar] = await Promise.all([
       api.get('/facturas'),
       api.get('/huespedes', { params: { limit: 200 } }),
       api.get('/clientes'),
+      api.get('/bancos/cuentas').catch(() => ({ data: { data: [] } })),
       api.get('/facturas/sar/config').catch(() => ({ data: { data: null } })),
     ])
     setFacturas(f.data.data || [])
     setHuespedes(h.data.data || [])
     setClientesCorp(c.data.data || [])
+    setCuentasBancarias(cb.data.data || [])
     setSarConfig(sar.data.data)
   }
 
@@ -157,6 +160,9 @@ export default function FacturasPage() {
     if (form.metodo_pago === 'CREDITO' && !form.cliente_corporativo_id) {
       return toast.error('Para facturar al crédito, seleccioná un Cliente Corporativo')
     }
+    if (['TARJETA', 'TRANSFERENCIA'].includes(form.metodo_pago) && !form.cuenta_bancaria_id) {
+      return toast.error('Seleccioná la cuenta bancaria que recibe el pago')
+    }
     const rFactura = await api.post('/facturas', {
       ...form,
       checkin_id: checkinOrigenId || null, // vincula la factura al check-in de origen (evita duplicados al completar el Check-Out)
@@ -171,7 +177,7 @@ export default function FacturasPage() {
 
     const origenCheckin = checkinOrigenId
     setShowEmitir(false)
-    setForm({ huesped_id:'', cliente_nombre:'', cliente_rtn:'', cliente_direccion:'', cliente_corporativo_id:'', metodo_pago:'EFECTIVO', moneda:'HNL', tasa_cambio:1, descuento:0, observaciones:'', items: [{ ...ITEM_INIT }] })
+    setForm({ huesped_id:'', cliente_nombre:'', cliente_rtn:'', cliente_direccion:'', cliente_corporativo_id:'', cuenta_bancaria_id:'', metodo_pago:'EFECTIVO', moneda:'HNL', tasa_cambio:1, descuento:0, observaciones:'', items: [{ ...ITEM_INIT }] })
     setHuespedExento(false)
     setCheckinOrigenId(null)
     cargar()
@@ -388,6 +394,19 @@ export default function FacturasPage() {
                     <option value="">Seleccionar cliente corporativo...</option>
                     {clientesCorp.map(c => <option key={c.id} value={c.id}>{c.razon_social} — {c.dias_credito} días de crédito</option>)}
                   </select>
+                </div>
+              )}
+
+              {['TARJETA', 'TRANSFERENCIA'].includes(form.metodo_pago) && (
+                <div>
+                  <label className="label">Cuenta Bancaria * <span className="text-slate-500 font-normal">({form.metodo_pago === 'TARJETA' ? 'cuenta del POS que recibe el cobro' : 'cuenta que recibe la transferencia'})</span></label>
+                  <select value={form.cuenta_bancaria_id} onChange={e=>setForm(p=>({...p,cuenta_bancaria_id:e.target.value}))} className="input-field" required>
+                    <option value="">Seleccionar cuenta bancaria...</option>
+                    {cuentasBancarias.map(c => <option key={c.id} value={c.id}>{c.banco_nombre} — {c.numero_cuenta} ({c.moneda})</option>)}
+                  </select>
+                  {cuentasBancarias.length === 0 && (
+                    <p className="text-xs text-amber-400 mt-1">No hay cuentas bancarias registradas. Creá una en el módulo Bancos.</p>
+                  )}
                 </div>
               )}
               <div className="flex justify-end gap-3">

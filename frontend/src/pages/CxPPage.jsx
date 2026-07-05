@@ -9,7 +9,11 @@ import MoneyInput from '../components/common/MoneyInput'
 export default function CxPPage() {
   const [cuentas, setCuentas] = useState([])
   const [proveedores, setProveedores] = useState([])
+  const [cuentasBancarias, setCuentasBancarias] = useState([])
   const [showModal, setShowModal] = useState(false)
+  const [showPagarModal, setShowPagarModal] = useState(false)
+  const [cuentaAPagar, setCuentaAPagar] = useState(null)
+  const [pagoForm, setPagoForm] = useState({ metodo_pago: 'EFECTIVO', cuenta_bancaria_id: '' })
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState({
     proveedor_id: '', concepto: '', numero_factura_proveedor: '',
@@ -19,9 +23,14 @@ export default function CxPPage() {
   const cargar = async () => {
     setLoading(true)
     try {
-      const [c, p] = await Promise.all([api.get('/cuentas-pagar'), api.get('/proveedores')])
+      const [c, p, cb] = await Promise.all([
+        api.get('/cuentas-pagar'),
+        api.get('/proveedores'),
+        api.get('/bancos/cuentas').catch(() => ({ data: { data: [] } })),
+      ])
       setCuentas(c.data.data || [])
       setProveedores(p.data.data || [])
+      setCuentasBancarias(cb.data.data || [])
     } finally { setLoading(false) }
   }
 
@@ -36,10 +45,21 @@ export default function CxPPage() {
     cargar()
   }
 
-  const marcarPagado = async (id) => {
-    if (!confirm('¿Marcar esta cuenta como pagada?')) return
-    await api.patch(`/cuentas-pagar/${id}/pagar`)
+  const abrirPagar = (cuenta) => {
+    setCuentaAPagar(cuenta)
+    setPagoForm({ metodo_pago: 'EFECTIVO', cuenta_bancaria_id: '' })
+    setShowPagarModal(true)
+  }
+
+  const confirmarPago = async (e) => {
+    e.preventDefault()
+    if (pagoForm.metodo_pago === 'TRANSFERENCIA' && !pagoForm.cuenta_bancaria_id) {
+      return toast.error('Seleccioná la cuenta bancaria desde la que se paga')
+    }
+    await api.patch(`/cuentas-pagar/${cuentaAPagar.id}/pagar`, pagoForm)
     toast.success('Cuenta marcada como pagada')
+    setShowPagarModal(false)
+    setCuentaAPagar(null)
     cargar()
   }
 
@@ -100,7 +120,7 @@ export default function CxPPage() {
                   </td>
                   <td className="table-cell">
                     {c.estado === 'PENDIENTE' && (
-                      <button onClick={() => marcarPagado(c.id)} className="text-emerald-400 hover:text-emerald-300 text-xs px-2 py-1 rounded border border-emerald-500/30">
+                      <button onClick={() => abrirPagar(c)} className="text-emerald-400 hover:text-emerald-300 text-xs px-2 py-1 rounded border border-emerald-500/30">
                         Pagado
                       </button>
                     )}
@@ -152,6 +172,44 @@ export default function CxPPage() {
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Cancelar</button>
                 <button type="submit" className="btn-primary">Guardar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {showPagarModal && cuentaAPagar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-slate-700">
+              <h2 className="text-lg font-semibold text-white">Marcar como Pagada</h2>
+              <button onClick={() => setShowPagarModal(false)}><X className="w-5 h-5 text-slate-500" /></button>
+            </div>
+            <form onSubmit={confirmarPago} className="p-6 space-y-4">
+              <div className="text-sm text-slate-400">
+                <span className="text-slate-200 font-medium">{cuentaAPagar.proveedor_nombre}</span> — {cuentaAPagar.concepto}
+                <div className="mt-1"><PrecioDual monto={cuentaAPagar.monto_total} size="sm" /></div>
+              </div>
+              <div>
+                <label className="label">Método de Pago *</label>
+                <select value={pagoForm.metodo_pago} onChange={e => setPagoForm(p => ({ ...p, metodo_pago: e.target.value }))} className="input-field">
+                  {['EFECTIVO', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE'].map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              {pagoForm.metodo_pago === 'TRANSFERENCIA' && (
+                <div>
+                  <label className="label">Cuenta Bancaria * <span className="text-slate-500 font-normal">(de dónde sale el dinero)</span></label>
+                  <select value={pagoForm.cuenta_bancaria_id} onChange={e => setPagoForm(p => ({ ...p, cuenta_bancaria_id: e.target.value }))} className="input-field" required>
+                    <option value="">Seleccionar cuenta bancaria...</option>
+                    {cuentasBancarias.map(c => <option key={c.id} value={c.id}>{c.banco_nombre} — {c.numero_cuenta} ({c.moneda})</option>)}
+                  </select>
+                  {cuentasBancarias.length === 0 && (
+                    <p className="text-xs text-amber-400 mt-1">No hay cuentas bancarias registradas. Creá una en el módulo Bancos.</p>
+                  )}
+                </div>
+              )}
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setShowPagarModal(false)} className="btn-secondary">Cancelar</button>
+                <button type="submit" className="btn-primary">Confirmar Pago</button>
               </div>
             </form>
           </div>

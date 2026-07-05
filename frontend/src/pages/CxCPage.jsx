@@ -9,17 +9,22 @@ import MoneyInput from '../components/common/MoneyInput'
 export default function CxCPage() {
   const [cuentas, setCuentas] = useState([])
   const [resumen, setResumen] = useState({})
+  const [cuentasBancarias, setCuentasBancarias] = useState([])
   const [showAbono, setShowAbono] = useState(false)
   const [selectedId, setSelectedId] = useState(null)
-  const [abono, setAbono] = useState({ monto: '', metodo_pago: 'EFECTIVO', observaciones: '' })
+  const [abono, setAbono] = useState({ monto: '', metodo_pago: 'EFECTIVO', cuenta_bancaria_id: '', observaciones: '' })
   const [loading, setLoading] = useState(true)
 
   const cargar = async () => {
     setLoading(true)
     try {
-      const r = await api.get('/cuentas-cobrar')
+      const [r, cb] = await Promise.all([
+        api.get('/cuentas-cobrar'),
+        api.get('/bancos/cuentas').catch(() => ({ data: { data: [] } })),
+      ])
       setCuentas(r.data.data || [])
       setResumen(r.data.resumen || {})
+      setCuentasBancarias(cb.data.data || [])
     } finally { setLoading(false) }
   }
 
@@ -27,10 +32,13 @@ export default function CxCPage() {
 
   const abonar = async (e) => {
     e.preventDefault()
+    if (['TARJETA', 'TRANSFERENCIA'].includes(abono.metodo_pago) && !abono.cuenta_bancaria_id) {
+      return toast.error('Seleccioná la cuenta bancaria que recibe el abono')
+    }
     await api.post(`/cuentas-cobrar/${selectedId}/abono`, abono)
     toast.success('Abono registrado')
     setShowAbono(false)
-    setAbono({ monto: '', metodo_pago: 'EFECTIVO', observaciones: '' })
+    setAbono({ monto: '', metodo_pago: 'EFECTIVO', cuenta_bancaria_id: '', observaciones: '' })
     cargar()
   }
 
@@ -135,6 +143,18 @@ export default function CxCPage() {
                   {['EFECTIVO', 'TARJETA', 'TRANSFERENCIA', 'CHEQUE'].map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
+              {['TARJETA', 'TRANSFERENCIA'].includes(abono.metodo_pago) && (
+                <div>
+                  <label className="label">Cuenta Bancaria * <span className="text-slate-500 font-normal">(recibe el abono)</span></label>
+                  <select value={abono.cuenta_bancaria_id} onChange={e => setAbono(p => ({ ...p, cuenta_bancaria_id: e.target.value }))} className="input-field" required>
+                    <option value="">Seleccionar cuenta bancaria...</option>
+                    {cuentasBancarias.map(c => <option key={c.id} value={c.id}>{c.banco_nombre} — {c.numero_cuenta} ({c.moneda})</option>)}
+                  </select>
+                  {cuentasBancarias.length === 0 && (
+                    <p className="text-xs text-amber-400 mt-1">No hay cuentas bancarias registradas. Creá una en el módulo Bancos.</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="label">Observaciones</label>
                 <input value={abono.observaciones} onChange={e => setAbono(p => ({ ...p, observaciones: e.target.value }))} className="input-field" />
