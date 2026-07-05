@@ -1,11 +1,10 @@
 // src/pages/ReservasPage.jsx
 import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Plus, Search, Calendar, RefreshCw, X, UserPlus, Building2, Users } from 'lucide-react'
+import { Plus, Search, Calendar, RefreshCw, X, Building2, Users } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import DateRangePicker from '../components/common/DateRangePicker'
-import ModalNuevoHuesped from '../components/common/ModalNuevoHuesped'
 import ModalNuevoClienteCorp from '../components/common/ModalNuevoClienteCorp'
 import MoneyInput from '../components/common/MoneyInput'
 import PrecioDual from '../components/common/PrecioDual'
@@ -56,10 +55,12 @@ export default function ReservasPage() {
   const [filtroEstado, setFiltroEstado] = useState('')
 
   const [showModal, setShowModal] = useState(false)
-  const [showNuevoHuesped, setShowNuevoHuesped] = useState(false)
   const [showNuevoCliente, setShowNuevoCliente] = useState(false)
-  const [modoHuesped, setModoHuesped] = useState('existente') // 'existente' | 'nuevo'
-  const [huespedSeleccionado, setHuespedSeleccionado] = useState(null) // objeto completo cuando es nuevo recién creado
+  const [huespedSeleccionado, setHuespedSeleccionado] = useState(null) // huésped existente elegido de las sugerencias
+  const [huespedQuery, setHuespedQuery] = useState('') // texto escrito para buscar/crear huésped
+  const [mostrarSugerencias, setMostrarSugerencias] = useState(false)
+  const [nuevoTipoDoc, setNuevoTipoDoc] = useState('CEDULA')
+  const [nuevoNumeroDoc, setNuevoNumeroDoc] = useState('')
 
   const [form, setForm] = useState(FORM_INIT)
 
@@ -108,8 +109,11 @@ export default function ReservasPage() {
 
   const abrirNueva = (habitacionId) => {
     setForm({ ...FORM_INIT, ...fechasPorDefecto(), habitacion_id: habitacionId || '' })
-    setModoHuesped('existente')
     setHuespedSeleccionado(null)
+    setHuespedQuery('')
+    setMostrarSugerencias(false)
+    setNuevoTipoDoc('CEDULA')
+    setNuevoNumeroDoc('')
     setShowModal(true)
   }
 
@@ -139,11 +143,33 @@ export default function ReservasPage() {
     preseleccionar()
   }, [location.state, loading]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onHuespedCreado = (huesped) => {
-    setHuespedSeleccionado(huesped)
-    setForm(p => ({ ...p, huesped_id: huesped.id, empresa: huesped.empresa || p.empresa }))
-    setShowNuevoHuesped(false)
-    setModoHuesped('existente') // ya queda seleccionado como "existente" tras crearse
+  // El usuario clickeó una sugerencia de huésped ya existente
+  const seleccionarHuespedExistente = (h) => {
+    setHuespedSeleccionado(h)
+    setForm(p => ({ ...p, huesped_id: h.id, empresa: h.empresa || p.empresa }))
+    setHuespedQuery('')
+    setMostrarSugerencias(false)
+  }
+
+  const limpiarHuespedSeleccionado = () => {
+    setHuespedSeleccionado(null)
+    setForm(p => ({ ...p, huesped_id: '' }))
+    setHuespedQuery('')
+    setNuevoNumeroDoc('')
+  }
+
+  const sugerenciasHuesped = huespedQuery.trim()
+    ? huespedes.filter(h => `${h.nombres} ${h.apellidos}`.toLowerCase().includes(huespedQuery.trim().toLowerCase())).slice(0, 6)
+    : []
+
+  // Reparte "Juan Carlos Pérez López" en nombres/apellidos para el registro rápido.
+  // 2 palabras: nombre + apellido. 3: 1 nombre + 2 apellidos. 4+: 2 nombres + 2 apellidos.
+  const partirNombreCompleto = (texto) => {
+    const palabras = texto.trim().split(/\s+/).filter(Boolean)
+    if (palabras.length <= 1) return { nombres: palabras[0] || '', apellidos: '' }
+    if (palabras.length === 2) return { nombres: palabras[0], apellidos: palabras[1] }
+    if (palabras.length === 3) return { nombres: palabras[0], apellidos: palabras.slice(1).join(' ') }
+    return { nombres: palabras.slice(0, -2).join(' '), apellidos: palabras.slice(-2).join(' ') }
   }
 
   const onClienteCreado = (cliente) => {
@@ -159,10 +185,19 @@ export default function ReservasPage() {
       return toast.error('Seleccioná las fechas de entrada y salida en el calendario')
     }
     if (!form.habitacion_id) return toast.error('Seleccioná una habitación')
-    if (!form.huesped_id) return toast.error('Seleccioná o registrá un huésped')
+
+    let payload = { ...form }
+    if (form.huesped_id) {
+      // Huésped existente ya seleccionado de las sugerencias
+    } else {
+      const { nombres, apellidos } = partirNombreCompleto(huespedQuery)
+      if (!nombres || !apellidos) return toast.error('Escribí el nombre completo del huésped (nombre y apellido)')
+      if (!nuevoNumeroDoc) return toast.error('Indicá el número de documento del huésped')
+      payload.huesped_nuevo = { nombres, apellidos, tipo_doc: nuevoTipoDoc, numero_doc: nuevoNumeroDoc }
+    }
 
     try {
-      await api.post('/reservas', form)
+      await api.post('/reservas', payload)
       toast.success('Reserva creada exitosamente')
       setShowModal(false)
       setForm(FORM_INIT)
@@ -252,37 +287,63 @@ export default function ReservasPage() {
             </div>
             <form onSubmit={guardar} className="p-6 space-y-5">
 
-              {/* ── Sección Huésped ── */}
+              {/* ── Sección Huésped: búsqueda rápida en una sola línea ── */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="label mb-0">Huésped *</label>
-                  <div className="flex gap-1 bg-slate-900/50 rounded-lg p-0.5">
-                    <button type="button" onClick={() => setModoHuesped('existente')}
-                      className={`text-xs px-3 py-1 rounded-md transition-all ${modoHuesped === 'existente' ? 'bg-brand-600 text-white' : 'text-slate-400'}`}>
+                  {huespedSeleccionado && (
+                    <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
                       Existente
-                    </button>
-                    <button type="button" onClick={() => { setModoHuesped('nuevo'); setShowNuevoHuesped(true) }}
-                      className={`text-xs px-3 py-1 rounded-md transition-all flex items-center gap-1 ${modoHuesped === 'nuevo' ? 'bg-brand-600 text-white' : 'text-slate-400'}`}>
-                      <UserPlus className="w-3 h-3" /> Nuevo
-                    </button>
-                  </div>
+                    </span>
+                  )}
                 </div>
 
                 {huespedSeleccionado ? (
                   <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-3">
                     <div className="flex items-center gap-2">
                       <Users className="w-4 h-4 text-emerald-400" />
-                      <span className="text-sm text-emerald-300 font-medium">{huespedSeleccionado.nombre_completo}</span>
-                      <span className="text-xs text-slate-500">— recién registrado</span>
+                      <span className="text-sm text-emerald-300 font-medium">{huespedSeleccionado.nombres} {huespedSeleccionado.apellidos}</span>
+                      <span className="text-xs text-slate-500">— {huespedSeleccionado.numero_doc}</span>
                     </div>
-                    <button type="button" onClick={() => { setHuespedSeleccionado(null); setForm(p => ({ ...p, huesped_id: '' })) }}
+                    <button type="button" onClick={limpiarHuespedSeleccionado}
                       className="text-slate-500 hover:text-red-400"><X className="w-4 h-4" /></button>
                   </div>
                 ) : (
-                  <select value={form.huesped_id} onChange={e => setForm(p => ({ ...p, huesped_id: e.target.value }))} className="input-field" required>
-                    <option value="">Seleccionar huésped...</option>
-                    {huespedes.map(h => <option key={h.id} value={h.id}>{h.nombres} {h.apellidos} — {h.numero_doc}</option>)}
-                  </select>
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <input
+                        value={huespedQuery}
+                        onChange={e => { setHuespedQuery(e.target.value); setMostrarSugerencias(true) }}
+                        onFocus={() => setMostrarSugerencias(true)}
+                        onBlur={() => setTimeout(() => setMostrarSugerencias(false), 150)}
+                        placeholder="Escribí el nombre completo del huésped..."
+                        className="input-field"
+                        autoComplete="off"
+                      />
+                      {mostrarSugerencias && sugerenciasHuesped.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg shadow-lg overflow-hidden">
+                          {sugerenciasHuesped.map(h => (
+                            <button key={h.id} type="button" onClick={() => seleccionarHuespedExistente(h)}
+                              className="w-full flex items-center justify-between px-4 py-2 text-sm text-left hover:bg-slate-800 transition-colors">
+                              <span className="text-slate-200">{h.nombres} {h.apellidos} <span className="text-slate-500 text-xs">— {h.numero_doc}</span></span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Existente</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Si no eligió una sugerencia existente, se registra al vuelo con estos dos datos */}
+                    {huespedQuery.trim().length > 0 && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <select value={nuevoTipoDoc} onChange={e => setNuevoTipoDoc(e.target.value)} className="input-field">
+                          {['CEDULA', 'PASAPORTE', 'RTN', 'CARNET_RESIDENTE'].map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <input value={nuevoNumeroDoc} onChange={e => setNuevoNumeroDoc(e.target.value)}
+                          placeholder="N° de documento" className="input-field" />
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -401,14 +462,6 @@ export default function ReservasPage() {
             </form>
           </div>
         </div>
-      )}
-
-      {/* Ventana independiente: Nuevo Huésped */}
-      {showNuevoHuesped && (
-        <ModalNuevoHuesped
-          onClose={() => { setShowNuevoHuesped(false); setModoHuesped('existente') }}
-          onCreated={onHuespedCreado}
-        />
       )}
 
       {/* Ventana independiente: Nuevo Cliente Corporativo */}
