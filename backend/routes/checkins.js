@@ -37,7 +37,8 @@ router.get('/:id', (req, res) => {
     const checkin = db.prepare(`
       SELECT c.*, h.*, hab.numero, hab.tipo, hab.piso,
         r.codigo, r.tarifa_aplicada, r.moneda, r.tasa_cambio, r.tipo_garantia,
-        r.monto_deposito, r.notas, r.empresa, r.adultos, r.ninos, r.fecha_entrada, r.motivo_visita
+        r.monto_deposito, r.notas, r.empresa, r.adultos, r.ninos, r.fecha_entrada, r.motivo_visita,
+        r.cliente_corporativo_id
       FROM checkins c
       JOIN huespedes h ON c.huesped_id = h.id
       JOIN habitaciones hab ON c.habitacion_id = hab.id
@@ -127,12 +128,19 @@ router.post('/:id/checkout', (req, res) => {
 
     const checkin = db.prepare(`
       SELECT c.*, r.tarifa_aplicada, r.moneda, r.tasa_cambio, r.monto_deposito, r.notas,
-        r.fecha_entrada, r.fecha_salida
+        r.fecha_entrada, r.fecha_salida, r.cliente_corporativo_id
       FROM checkins c JOIN reservas r ON c.reserva_id = r.id
       WHERE c.id = ? AND c.estado = 'ACTIVO'
     `).get(req.params.id);
 
     if (!checkin) return res.status(404).json({ ok: false, error: 'Check-in activo no encontrado' });
+
+    // Factura al crédito necesita un Cliente Corporativo (para la Cuenta por
+    // Cobrar) — si la reserva no tiene uno asociado, avisamos antes de seguir
+    // en vez de emitir una factura "al crédito" que nunca aparecería en CxC.
+    if (metodo_pago === 'CREDITO' && !checkin.cliente_corporativo_id) {
+      return res.status(400).json({ ok: false, error: 'Esta reserva no tiene un Cliente Corporativo asociado; no se puede facturar al crédito' });
+    }
 
     const huesped = db.prepare('SELECT * FROM huespedes WHERE id = ?').get(checkin.huesped_id);
     const extras = db.prepare('SELECT * FROM servicios_extras WHERE checkin_id = ?').all(req.params.id);
@@ -282,6 +290,22 @@ router.post('/:id/checkout', (req, res) => {
             facturaId, it.descripcion, it.cantidad, it.precio_unitario,
             it.aplica_isv ? 1 : 0, it.aplica_iht ? 1 : 0, it.subtotal
           ));
+
+          // Factura al crédito -> generar su Cuenta por Cobrar automáticamente,
+          // igual que en la emisión manual (facturas.js). Ya validamos arriba
+          // que la reserva tiene un cliente_corporativo_id antes de llegar acá.
+          if (metodo_pago === 'CREDITO' && checkin.cliente_corporativo_id) {
+            const cliente = db.prepare('SELECT dias_credito FROM clientes_corporativos WHERE id = ?').get(checkin.cliente_corporativo_id);
+            const dias = cliente?.dias_credito ?? 30;
+            const vencimiento = new Date();
+            vencimiento.setDate(vencimiento.getDate() + dias);
+            const fechaVencimiento = vencimiento.toISOString().split('T')[0];
+
+            db.prepare(`
+              INSERT INTO cuentas_cobrar (factura_id, cliente_id, monto_original, saldo_pendiente, fecha_vencimiento, estado)
+              VALUES (?, ?, ?, ?, ?, 'PENDIENTE')
+            `).run(facturaId, checkin.cliente_corporativo_id, total, total, fechaVencimiento);
+          }
         }
       }
     });

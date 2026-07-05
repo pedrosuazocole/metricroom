@@ -124,7 +124,7 @@ router.post('/', (req, res) => {
   try {
     const db = getDB();
     const {
-      checkin_id, reserva_id, huesped_id,
+      checkin_id, reserva_id, huesped_id, cliente_corporativo_id,
       cliente_nombre, cliente_rtn, cliente_direccion,
       // items: [{ descripcion, cantidad, precio_unitario, aplica_isv: bool, aplica_iht: bool }]
       // Regla de negocio Honduras (Hotel):
@@ -139,6 +139,11 @@ router.post('/', (req, res) => {
 
     if (!huesped_id || !items?.length || !metodo_pago) {
       return res.status(400).json({ ok: false, error: 'huesped_id, items y metodo_pago son requeridos' });
+    }
+    // Una factura AL CRÉDITO necesita un Cliente Corporativo para poder
+    // registrarse en Cuentas por Cobrar (ahí vive el plazo de días de crédito).
+    if (metodo_pago === 'CREDITO' && !cliente_corporativo_id) {
+      return res.status(400).json({ ok: false, error: 'Para facturar al crédito, seleccioná un Cliente Corporativo' });
     }
 
     // Leer tasas de impuesto desde configuración (editables en Configuración → Hotel)
@@ -211,6 +216,22 @@ router.post('/', (req, res) => {
           item.aplicaIsv ? 1 : 0, item.aplicaIht ? 1 : 0, item.sub
         );
       });
+
+      // Factura al crédito -> generar su Cuenta por Cobrar automáticamente.
+      // La fecha de vencimiento sale de los días de crédito configurados
+      // para ese cliente corporativo (por defecto 30 si no tiene definidos).
+      if (metodo_pago === 'CREDITO') {
+        const cliente = db.prepare('SELECT dias_credito FROM clientes_corporativos WHERE id = ?').get(cliente_corporativo_id);
+        const dias = cliente?.dias_credito ?? 30;
+        const vencimiento = new Date();
+        vencimiento.setDate(vencimiento.getDate() + dias);
+        const fechaVencimiento = vencimiento.toISOString().split('T')[0];
+
+        db.prepare(`
+          INSERT INTO cuentas_cobrar (factura_id, cliente_id, monto_original, saldo_pendiente, fecha_vencimiento, estado)
+          VALUES (?, ?, ?, ?, ?, 'PENDIENTE')
+        `).run(facturaId, cliente_corporativo_id, total, total, fechaVencimiento);
+      }
 
       return { facturaId, numero, total };
     });
