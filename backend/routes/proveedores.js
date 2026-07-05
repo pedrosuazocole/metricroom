@@ -19,4 +19,17 @@ router.post('/', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+router.put('/:id', (req, res) => {
+  try {
+    const db = getDB();
+    const { razon_social, rtn, contacto, telefono, email, direccion, categoria, condiciones_pago, dias_credito } = req.body;
+    if (!razon_social) return res.status(400).json({ ok: false, error: 'razon_social requerido' });
+    const existe = db.prepare('SELECT id FROM proveedores WHERE id = ?').get(req.params.id);
+    if (!existe) return res.status(404).json({ ok: false, error: 'Proveedor no encontrado' });
+    db.prepare('UPDATE proveedores SET razon_social=?, rtn=?, contacto=?, telefono=?, email=?, direccion=?, categoria=?, condiciones_pago=?, dias_credito=? WHERE id=?')
+      .run(razon_social, rtn, contacto, telefono, email, direccion, categoria, condiciones_pago, dias_credito || 0, req.params.id);
+    res.json({ ok: true, message: 'Proveedor actualizado' });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 module.exports = router;

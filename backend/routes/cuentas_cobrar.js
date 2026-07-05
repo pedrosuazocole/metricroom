@@ -6,13 +6,25 @@ router.get('/', (req, res) => {
   try {
     const db = getDB();
     const data = db.prepare(`
-      SELECT cxc.*, f.numero_factura, c.razon_social as cliente_nombre
+      SELECT cxc.*, cxc.monto_original as monto_total,
+             (cxc.monto_original - cxc.saldo_pendiente) as monto_abonado,
+             f.numero_factura, f.created_at as fecha_emision,
+             ('Factura ' || f.numero_factura) as concepto,
+             c.razon_social as cliente_nombre
       FROM cuentas_cobrar cxc
       JOIN facturas f ON cxc.factura_id = f.id
       JOIN clientes_corporativos c ON cxc.cliente_id = c.id
       ORDER BY cxc.fecha_vencimiento ASC
     `).all();
-    res.json({ ok: true, data });
+
+    const resumen = {
+      total_pendiente: data.reduce((s, c) => s + (c.saldo_pendiente || 0), 0),
+      total_cuentas: data.filter(c => c.estado !== 'PAGADA').length,
+      saldo_vencido: data.filter(c => c.fecha_vencimiento && new Date(c.fecha_vencimiento) < new Date() && c.estado !== 'PAGADA')
+        .reduce((s, c) => s + (c.saldo_pendiente || 0), 0),
+    };
+
+    res.json({ ok: true, data, resumen });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -20,6 +32,7 @@ router.post('/:id/abono', (req, res) => {
   try {
     const db = getDB();
     const { monto } = req.body;
+    if (!monto || monto <= 0) return res.status(400).json({ ok: false, error: 'monto requerido' });
     const cxc = db.prepare('SELECT * FROM cuentas_cobrar WHERE id = ?').get(req.params.id);
     if (!cxc) return res.status(404).json({ ok: false, error: 'CxC no encontrada' });
     const nuevo_saldo = Math.max(0, cxc.saldo_pendiente - monto);

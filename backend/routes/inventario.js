@@ -25,6 +25,27 @@ router.post('/', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+router.put('/:id', (req, res) => {
+  try {
+    const db = getDB();
+    const { codigo, nombre, categoria, unidad_medida, stock_minimo, precio_costo, proveedor_id, ubicacion } = req.body;
+    if (!nombre || !categoria) return res.status(400).json({ ok: false, error: 'nombre y categoria requeridos' });
+    const existe = db.prepare('SELECT id FROM inventario WHERE id = ?').get(req.params.id);
+    if (!existe) return res.status(404).json({ ok: false, error: 'Artículo no encontrado' });
+    db.prepare('UPDATE inventario SET codigo=?, nombre=?, categoria=?, unidad_medida=?, stock_minimo=?, precio_costo=?, proveedor_id=?, ubicacion=? WHERE id=?')
+      .run(codigo, nombre, categoria, unidad_medida || 'UNIDAD', stock_minimo || 0, precio_costo || 0, proveedor_id, ubicacion, req.params.id);
+    res.json({ ok: true, message: 'Artículo actualizado' });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.get('/:id/movimientos', (req, res) => {
+  try {
+    const db = getDB();
+    const data = db.prepare('SELECT * FROM movimientos_inventario WHERE inventario_id = ? ORDER BY fecha DESC, id DESC').all(req.params.id);
+    res.json({ ok: true, data });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.post('/:id/movimiento', (req, res) => {
   try {
     const db = getDB();
