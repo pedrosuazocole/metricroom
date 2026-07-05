@@ -621,13 +621,25 @@ function migrarEsquemaViejo() {
   } catch (err) {
     console.error('⚠️  Migración habitaciones (quitar CHECK viejo) falló:', err.message);
     console.error('   Usá GET /api/diag y /api/repair-habitaciones para diagnosticar y reparar manualmente.');
-  // ── Migración: FK fosilizada a habitaciones_old en reservas/checkins ──
-  // Cuando la tabla "habitaciones" se renombró temporalmente a "habitaciones_old"
-  // durante una migración anterior, SQLite NO actualiza automáticamente las
-  // FOREIGN KEY de otras tablas que ya referenciaban "habitaciones" — la
-  // definición SQL de "reservas"/"checkins" puede haber quedado fosilizada
-  // apuntando literalmente a "habitaciones_old", aunque esa tabla ya no exista.
-  // Esto se reconstruye igual que con habitaciones: RENAME + CREATE + INSERT + DROP.
+  }
+
+  // ── Migración: FK fosilizada en tablas hijas tras el RENAME de su tabla padre ──
+  // Cuando una tabla se renombra temporalmente (ej. "habitaciones" -> "habitaciones_old",
+  // "checkins" -> "checkins_fix_old") durante su propia migración, SQLite no siempre
+  // actualiza las FOREIGN KEY de las demás tablas que ya la referenciaban — su
+  // definición SQL puede quedar fosilizada apuntando literalmente al nombre viejo,
+  // aunque esa tabla temporal ya no exista. Esto se reconstruye igual que con
+  // habitaciones: RENAME + CREATE + INSERT + DROP.
+  //
+  // IMPORTANTE: este bloque corre SIEMPRE en cada arranque del servidor, sin
+  // importar si la migración de habitaciones de arriba falló o no — antes vivía
+  // anidado por error dentro de ese catch, así que en un arranque normal (sin
+  // error previo) nunca se ejecutaba y las FK fosilizadas quedaban sin reparar.
+  //
+  // La detección es genérica (cualquier FK que apunte a una tabla "*_old"), no
+  // solo "habitaciones_old", porque el mismo problema se repite en cascada:
+  // reparar "checkins" puede fosilizar a su vez las FK de "facturas" y
+  // "servicios_extras" que apuntaban a checkins.
   //
   // Cada tabla se repara en su propio try/catch, y antes de intentar el RENAME
   // se limpia cualquier "<tabla>_fix_old" residual de un intento anterior
@@ -640,7 +652,7 @@ function migrarEsquemaViejo() {
   const fkFosilizada = (tabla) => {
     if (!tablaExisteGenerico(tabla)) return false;
     const fks = db.prepare(`PRAGMA foreign_key_list(${tabla})`).all();
-    return fks.some(fk => fk.table === 'habitaciones_old');
+    return fks.some(fk => fk.table.endsWith('_old'));
   };
 
   try {
@@ -771,6 +783,119 @@ function migrarEsquemaViejo() {
     console.error('⚠️  Migración FK fosilizada (checkins) falló:', err.message);
   }
 
+  // ── Migración: FK fosilizada en facturas/servicios_extras (referencian checkins) ──
+  // Efecto en cascada del bloque anterior: si "checkins" se renombró alguna vez
+  // a "checkins_fix_old" durante SU propia reparación, las tablas que a su vez
+  // referencian a checkins (facturas, servicios_extras) pueden haber quedado
+  // fosilizadas apuntando a "checkins_fix_old" — que es exactamente el error
+  // "no such table: main.checkins_fix_old" que se ve al hacer Check-Out
+  // (el checkout inserta en facturas y lee servicios_extras).
+  try {
+    const facturasExiste = tablaExisteGenerico('facturas');
+    const facturasOldExiste = tablaExisteGenerico('facturas_fix_old');
+
+    if (facturasExiste && !fkFosilizada('facturas') && facturasOldExiste) {
+      console.log('🧹 Limpiando facturas_fix_old residual (la migración ya había completado)...');
+      db.exec('DROP TABLE facturas_fix_old;');
+    }
+
+    if ((facturasExiste && fkFosilizada('facturas')) || (!facturasExiste && facturasOldExiste)) {
+      console.log('🔧 Reconstruyendo tabla facturas (FK fosilizada hacia checkins_fix_old)...');
+
+      const migrar = db.transaction(() => {
+        if (facturasExiste) {
+          db.exec('ALTER TABLE facturas RENAME TO facturas_fix_old;');
+        }
+        db.exec(`
+          CREATE TABLE facturas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            numero_factura TEXT NOT NULL UNIQUE,
+            cai TEXT NOT NULL,
+            checkin_id INTEGER,
+            reserva_id INTEGER,
+            huesped_id INTEGER NOT NULL,
+            cliente_nombre TEXT NOT NULL,
+            cliente_rtn TEXT,
+            cliente_direccion TEXT,
+            moneda TEXT DEFAULT 'HNL',
+            tasa_cambio REAL DEFAULT 1,
+            subtotal_exento REAL DEFAULT 0,
+            subtotal_gravado_isv REAL DEFAULT 0,
+            subtotal_gravado_iht REAL DEFAULT 0,
+            isv_15 REAL DEFAULT 0,
+            iht_4 REAL DEFAULT 0,
+            descuento REAL DEFAULT 0,
+            total REAL NOT NULL,
+            estado TEXT DEFAULT 'EMITIDA' CHECK(estado IN ('EMITIDA','ANULADA','CREDITO')),
+            metodo_pago TEXT CHECK(metodo_pago IN ('EFECTIVO','TARJETA','TRANSFERENCIA','CREDITO','MIXTO')),
+            observaciones TEXT,
+            impresa INTEGER DEFAULT 0,
+            enviada_email INTEGER DEFAULT 0,
+            created_by TEXT,
+            created_at TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (checkin_id) REFERENCES checkins(id),
+            FOREIGN KEY (huesped_id) REFERENCES huespedes(id)
+          );
+        `);
+        const colsViejas = db.prepare('PRAGMA table_info(facturas_fix_old)').all().map(c => c.name);
+        const colsComunes = colsViejas.filter(c =>
+          ['id','numero_factura','cai','checkin_id','reserva_id','huesped_id','cliente_nombre',
+           'cliente_rtn','cliente_direccion','moneda','tasa_cambio','subtotal_exento',
+           'subtotal_gravado_isv','subtotal_gravado_iht','isv_15','iht_4','descuento','total',
+           'estado','metodo_pago','observaciones','impresa','enviada_email','created_by','created_at'].includes(c)
+        ).join(', ');
+        db.exec(`INSERT INTO facturas (${colsComunes}) SELECT ${colsComunes} FROM facturas_fix_old;`);
+        db.exec('DROP TABLE facturas_fix_old;');
+      });
+      migrar();
+      console.log('✅ Tabla facturas reconstruida con FK correcta — datos preservados');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración FK fosilizada (facturas) falló:', err.message);
+  }
+
+  try {
+    const extrasExiste = tablaExisteGenerico('servicios_extras');
+    const extrasOldExiste = tablaExisteGenerico('servicios_extras_fix_old');
+
+    if (extrasExiste && !fkFosilizada('servicios_extras') && extrasOldExiste) {
+      console.log('🧹 Limpiando servicios_extras_fix_old residual (la migración ya había completado)...');
+      db.exec('DROP TABLE servicios_extras_fix_old;');
+    }
+
+    if ((extrasExiste && fkFosilizada('servicios_extras')) || (!extrasExiste && extrasOldExiste)) {
+      console.log('🔧 Reconstruyendo tabla servicios_extras (FK fosilizada hacia checkins_fix_old)...');
+
+      const migrar = db.transaction(() => {
+        if (extrasExiste) {
+          db.exec('ALTER TABLE servicios_extras RENAME TO servicios_extras_fix_old;');
+        }
+        db.exec(`
+          CREATE TABLE servicios_extras (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            checkin_id INTEGER NOT NULL,
+            descripcion TEXT NOT NULL,
+            cantidad REAL DEFAULT 1,
+            precio_unitario REAL NOT NULL,
+            subtotal REAL NOT NULL,
+            categoria TEXT DEFAULT 'SERVICIO'
+              CHECK(categoria IN ('MINIBAR','RESTAURANTE','LAVANDERIA','TELEFONO','TRANSPORTE','OTROS','SERVICIO')),
+            fecha TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (checkin_id) REFERENCES checkins(id)
+          );
+        `);
+        const colsViejas = db.prepare('PRAGMA table_info(servicios_extras_fix_old)').all().map(c => c.name);
+        const colsComunes = colsViejas.filter(c =>
+          ['id','checkin_id','descripcion','cantidad','precio_unitario','subtotal','categoria','fecha'].includes(c)
+        ).join(', ');
+        db.exec(`INSERT INTO servicios_extras (${colsComunes}) SELECT ${colsComunes} FROM servicios_extras_fix_old;`);
+        db.exec('DROP TABLE servicios_extras_fix_old;');
+      });
+      migrar();
+      console.log('✅ Tabla servicios_extras reconstruida con FK correcta — datos preservados');
+    }
+  } catch (err) {
+    console.error('⚠️  Migración FK fosilizada (servicios_extras) falló:', err.message);
   }
 }
 
