@@ -151,7 +151,9 @@ export default function PlanningPage() {
       icon: Calendar,
       label: 'Nueva Reserva',
       color: 'bg-blue-600/20 border-blue-500/40 text-blue-400 hover:bg-blue-600/30',
-      onClick: () => navigate('/reservas'),
+      onClick: () => navigate('/reservas', {
+        state: { preseleccionarHabitacionId: selected.id }
+      }),
     },
     // Check-In — solo si está RESERVADA o RESERVADA_GARANTIZADA
     {

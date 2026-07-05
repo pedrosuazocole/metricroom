@@ -1,5 +1,6 @@
 // src/pages/ReservasPage.jsx
 import { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Plus, Search, Calendar, RefreshCw, X, UserPlus, Building2, Users } from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
@@ -29,8 +30,20 @@ const FORM_INIT = {
   // MoneyInput, que convierte automáticamente si el usuario tipeó en USD.
 }
 
+// Fechas por defecto para agilizar la reserva más común: 1 noche, entrando hoy.
+// Se calculan al vuelo (no en FORM_INIT) para que siempre reflejen la fecha actual.
+function fechasPorDefecto() {
+  const hoy = new Date()
+  const manana = new Date(hoy)
+  manana.setDate(manana.getDate() + 1)
+  const toISO = d => d.toISOString().split('T')[0]
+  return { fecha_entrada: toISO(hoy), fecha_salida: toISO(manana) }
+}
+
 export default function ReservasPage() {
   const { tasaVenta, tieneTasa } = useTasaCambio() || {}
+  const location = useLocation()
+  const navigate = useNavigate()
   const [reservas, setReservas] = useState([])
   const [huespedes, setHuespedes] = useState([])
   const [habitaciones, setHabitaciones] = useState([])
@@ -93,12 +106,38 @@ export default function ReservasPage() {
     cargar()
   }
 
-  const abrirNueva = () => {
-    setForm(FORM_INIT)
+  const abrirNueva = (habitacionId) => {
+    setForm({ ...FORM_INIT, ...fechasPorDefecto(), habitacion_id: habitacionId || '' })
     setModoHuesped('existente')
     setHuespedSeleccionado(null)
     setShowModal(true)
   }
+
+  // Si llegamos desde Planning con una habitación específica (botón "Nueva
+  // Reserva" sobre una habitación Disponible/Sucia/Bloqueada), abrir el modal
+  // directamente con esa habitación ya preseleccionada — sin pasar por la lista.
+  useEffect(() => {
+    const habDesdeP = location.state?.preseleccionarHabitacionId
+    if (!habDesdeP || loading) return
+
+    const preseleccionar = async () => {
+      try {
+        // La habitación puede venir en estado Sucia o Bloqueada (no aparece en
+        // el listado de Disponibles), así que la traemos puntualmente para
+        // que el desplegable la muestre igual.
+        const r = await api.get(`/habitaciones/${habDesdeP}`)
+        const hab = r.data.data
+        if (hab) {
+          setHabitaciones(prev => prev.some(h => h.id === hab.id) ? prev : [hab, ...prev])
+        }
+      } catch { /* si falla, igual queda preseleccionada por id */ }
+
+      abrirNueva(habDesdeP)
+      // Limpiar el state de navegación para que un refresh no reabra el modal
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+    preseleccionar()
+  }, [location.state, loading]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onHuespedCreado = (huesped) => {
     setHuespedSeleccionado(huesped)
@@ -145,7 +184,7 @@ export default function ReservasPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">Reservas</h1>
-        <button onClick={abrirNueva} className="btn-primary">
+        <button onClick={() => abrirNueva()} className="btn-primary">
           <Plus className="w-4 h-4" /> Nueva Reserva
         </button>
       </div>
