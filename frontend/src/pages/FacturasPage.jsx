@@ -147,6 +147,7 @@ export default function FacturasPage() {
     if (total <= 0) return toast.error('El total debe ser mayor a cero')
     await api.post('/facturas', {
       ...form,
+      checkin_id: checkinOrigenId || null, // vincula la factura al check-in de origen (evita duplicados al completar el Check-Out)
       forzar_exento_isv: huespedExento,
       items: form.items.map(it => ({
         ...it,
@@ -163,23 +164,31 @@ export default function FacturasPage() {
     cargar()
 
     if (origenCheckin) {
-      // La factura del check-out ya quedó emitida. Falta el paso final:
-      // marcar la habitación como SUCIA/disponible (check-out real de la
-      // habitación) — eso se hace desde Check-Ins, como segundo paso aparte.
-      toast.success(
-        (t) => (
-          <span className="flex items-center gap-3">
-            Factura emitida. Falta completar el Check-Out de la habitación.
-            <button
-              onClick={() => { toast.dismiss(t.id); navigate('/checkins') }}
-              className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 flex-shrink-0"
-            >
-              <LogOut className="w-3.5 h-3.5" /> Ir a Check-Out
-            </button>
-          </span>
-        ),
-        { duration: 10000 }
-      )
+      // La factura ya quedó vinculada a este checkin (paso anterior). Ahora
+      // completamos el Check-Out real en el mismo paso — habitación a limpieza,
+      // checkin y reserva cerrados — en vez de dejarlo como tarea pendiente
+      // manual. El backend detecta que la factura ya existe (por checkin_id)
+      // y NO genera una segunda, solo cierra los estados y notifica.
+      try {
+        await api.post(`/checkins/${origenCheckin}/checkout`, { generar_factura: true })
+        toast.success('Factura emitida y Check-Out completado ✅')
+      } catch (e) {
+        toast.error(e.response?.data?.error || 'Factura emitida, pero no se pudo completar el Check-Out')
+        toast(
+          (t) => (
+            <span className="flex items-center gap-3">
+              Completá el Check-Out manualmente.
+              <button
+                onClick={() => { toast.dismiss(t.id); navigate('/checkins') }}
+                className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 flex-shrink-0"
+              >
+                <LogOut className="w-3.5 h-3.5" /> Ir a Check-Out
+              </button>
+            </span>
+          ),
+          { duration: 10000 }
+        )
+      }
     } else {
       toast.success('Factura emitida exitosamente')
     }
