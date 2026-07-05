@@ -124,7 +124,7 @@ router.post('/', (req, res) => {
 router.post('/:id/checkout', (req, res) => {
   try {
     const db = getDB();
-    const { observaciones, metodo_pago = 'EFECTIVO', generar_factura = true } = req.body;
+    const { observaciones, metodo_pago = 'EFECTIVO', cuenta_bancaria_id, generar_factura = true } = req.body;
 
     const checkin = db.prepare(`
       SELECT c.*, r.tarifa_aplicada, r.moneda, r.tasa_cambio, r.monto_deposito, r.notas,
@@ -140,6 +140,10 @@ router.post('/:id/checkout', (req, res) => {
     // en vez de emitir una factura "al crédito" que nunca aparecería en CxC.
     if (metodo_pago === 'CREDITO' && !checkin.cliente_corporativo_id) {
       return res.status(400).json({ ok: false, error: 'Esta reserva no tiene un Cliente Corporativo asociado; no se puede facturar al crédito' });
+    }
+    // Tarjeta (POS) y Transferencia entran directo a una cuenta bancaria.
+    if (['TARJETA', 'TRANSFERENCIA'].includes(metodo_pago) && !cuenta_bancaria_id) {
+      return res.status(400).json({ ok: false, error: 'Seleccioná la cuenta bancaria que recibe el pago' });
     }
 
     const huesped = db.prepare('SELECT * FROM huespedes WHERE id = ?').get(checkin.huesped_id);
@@ -268,8 +272,8 @@ router.post('/:id/checkout', (req, res) => {
               cliente_nombre, cliente_rtn, moneda, tasa_cambio,
               subtotal_exento, subtotal_gravado_isv, subtotal_gravado_iht,
               isv_15, iht_4, descuento, total,
-              estado, metodo_pago, observaciones, created_by
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'HNL', ?, ?, ?, ?, ?, ?, 0, ?, 'EMITIDA', ?, ?, 'SISTEMA')
+              estado, metodo_pago, cuenta_bancaria_id, observaciones, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'HNL', ?, ?, ?, ?, ?, ?, 0, ?, 'EMITIDA', ?, ?, ?, 'SISTEMA')
           `).run(
             numeroFactura, sarConfig.cai,
             parseInt(req.params.id), checkin.reserva_id, checkin.huesped_id,
@@ -277,7 +281,7 @@ router.post('/:id/checkout', (req, res) => {
             huesped?.rtn || null,
             tasaConversion,
             base_exenta, base_isv, base_iht,
-            isv_15, iht_4, total, metodo_pago, obsConversion
+            isv_15, iht_4, total, metodo_pago, cuenta_bancaria_id || null, obsConversion
           );
 
           facturaId = fRes.lastInsertRowid;
@@ -305,6 +309,17 @@ router.post('/:id/checkout', (req, res) => {
               INSERT INTO cuentas_cobrar (factura_id, cliente_id, monto_original, saldo_pendiente, fecha_vencimiento, estado)
               VALUES (?, ?, ?, ?, ?, 'PENDIENTE')
             `).run(facturaId, checkin.cliente_corporativo_id, total, total, fechaVencimiento);
+          }
+
+          // Tarjeta (POS) o Transferencia -> depositar el monto en la cuenta
+          // bancaria elegida, con su movimiento y saldo actualizados.
+          if (['TARJETA', 'TRANSFERENCIA'].includes(metodo_pago) && cuenta_bancaria_id) {
+            db.prepare(`
+              INSERT INTO movimientos_bancarios (cuenta_id, tipo, monto, descripcion, referencia, fecha, saldo_despues)
+              VALUES (?, 'DEPOSITO', ?, ?, ?, date('now','localtime'),
+                (SELECT saldo_actual FROM cuentas_bancarias WHERE id = ?) + ?)
+            `).run(cuenta_bancaria_id, total, `Cobro factura ${numeroFactura} (Check-Out)`, numeroFactura, cuenta_bancaria_id, total);
+            db.prepare('UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ?').run(total, cuenta_bancaria_id);
           }
         }
       }

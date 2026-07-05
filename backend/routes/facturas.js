@@ -132,7 +132,7 @@ router.post('/', (req, res) => {
       //  - Otros servicios (restaurante, lavandería, etc.): solo ISV 15%
       //  - Cliente exonerado de ISV: el IHT 4% se sigue cobrando igual, ISV se omite
       items,
-      moneda, tasa_cambio, metodo_pago,
+      moneda, tasa_cambio, metodo_pago, cuenta_bancaria_id,
       descuento, observaciones, created_by,
       forzar_exento_isv, // true si el huésped/cliente está exonerado de ISV
     } = req.body;
@@ -144,6 +144,10 @@ router.post('/', (req, res) => {
     // registrarse en Cuentas por Cobrar (ahí vive el plazo de días de crédito).
     if (metodo_pago === 'CREDITO' && !cliente_corporativo_id) {
       return res.status(400).json({ ok: false, error: 'Para facturar al crédito, seleccioná un Cliente Corporativo' });
+    }
+    // Tarjeta (POS) y Transferencia entran directo a una cuenta bancaria.
+    if (['TARJETA', 'TRANSFERENCIA'].includes(metodo_pago) && !cuenta_bancaria_id) {
+      return res.status(400).json({ ok: false, error: 'Seleccioná la cuenta bancaria que recibe el pago' });
     }
 
     // Leer tasas de impuesto desde configuración (editables en Configuración → Hotel)
@@ -194,14 +198,14 @@ router.post('/', (req, res) => {
           moneda, tasa_cambio,
           subtotal_exento, subtotal_gravado_isv, subtotal_gravado_iht,
           isv_15, iht_4, descuento, total,
-          estado, metodo_pago, observaciones, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EMITIDA', ?, ?, ?)
+          estado, metodo_pago, cuenta_bancaria_id, observaciones, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'EMITIDA', ?, ?, ?, ?)
       `).run(
         numero, cai, checkin_id, reserva_id, huesped_id,
         cliente_nombre, cliente_rtn, cliente_direccion,
         moneda || 'HNL', tasa_cambio || 1,
         base_exenta, base_isv, base_iht,
-        isv_15, iht_4, desc, total, metodo_pago, observaciones, created_by
+        isv_15, iht_4, desc, total, metodo_pago, cuenta_bancaria_id || null, observaciones, created_by
       );
 
       const facturaId = result.lastInsertRowid;
@@ -216,6 +220,17 @@ router.post('/', (req, res) => {
           item.aplicaIsv ? 1 : 0, item.aplicaIht ? 1 : 0, item.sub
         );
       });
+
+      // Tarjeta (POS) o Transferencia -> depositar el monto en la cuenta
+      // bancaria elegida, con su movimiento y saldo actualizados.
+      if (['TARJETA', 'TRANSFERENCIA'].includes(metodo_pago) && cuenta_bancaria_id) {
+        db.prepare(`
+          INSERT INTO movimientos_bancarios (cuenta_id, tipo, monto, descripcion, referencia, fecha, saldo_despues)
+          VALUES (?, 'DEPOSITO', ?, ?, ?, date('now','localtime'),
+            (SELECT saldo_actual FROM cuentas_bancarias WHERE id = ?) + ?)
+        `).run(cuenta_bancaria_id, total, `Cobro factura ${numero}`, numero, cuenta_bancaria_id, total);
+        db.prepare('UPDATE cuentas_bancarias SET saldo_actual = saldo_actual + ? WHERE id = ?').run(total, cuenta_bancaria_id);
+      }
 
       // Factura al crédito -> generar su Cuenta por Cobrar automáticamente.
       // La fecha de vencimiento sale de los días de crédito configurados

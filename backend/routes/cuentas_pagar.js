@@ -33,9 +33,31 @@ router.post('/', (req, res) => {
 router.patch('/:id/pagar', (req, res) => {
   try {
     const db = getDB();
+    const { metodo_pago, cuenta_bancaria_id } = req.body;
     const cxp = db.prepare('SELECT * FROM cuentas_pagar WHERE id = ?').get(req.params.id);
     if (!cxp) return res.status(404).json({ ok: false, error: 'Cuenta por pagar no encontrada' });
-    db.prepare("UPDATE cuentas_pagar SET saldo_pendiente = 0, estado = 'PAGADA' WHERE id = ?").run(req.params.id);
+
+    // Transferencia (pago a proveedor desde el banco) requiere elegir de qué
+    // cuenta sale el dinero, para poder registrar el retiro correspondiente.
+    if (metodo_pago === 'TRANSFERENCIA' && !cuenta_bancaria_id) {
+      return res.status(400).json({ ok: false, error: 'Seleccioná la cuenta bancaria desde la que se paga' });
+    }
+
+    const pagar = db.transaction(() => {
+      db.prepare("UPDATE cuentas_pagar SET saldo_pendiente = 0, estado = 'PAGADA', metodo_pago = ?, cuenta_bancaria_id = ? WHERE id = ?")
+        .run(metodo_pago || null, cuenta_bancaria_id || null, req.params.id);
+
+      if (metodo_pago === 'TRANSFERENCIA' && cuenta_bancaria_id) {
+        db.prepare(`
+          INSERT INTO movimientos_bancarios (cuenta_id, tipo, monto, descripcion, referencia, fecha, saldo_despues)
+          VALUES (?, 'RETIRO', ?, ?, ?, date('now','localtime'),
+            (SELECT saldo_actual FROM cuentas_bancarias WHERE id = ?) - ?)
+        `).run(cuenta_bancaria_id, cxp.saldo_pendiente, `Pago a proveedor: ${cxp.descripcion}`, `CxP-${cxp.id}`, cuenta_bancaria_id, cxp.saldo_pendiente);
+        db.prepare('UPDATE cuentas_bancarias SET saldo_actual = saldo_actual - ? WHERE id = ?').run(cxp.saldo_pendiente, cuenta_bancaria_id);
+      }
+    });
+    pagar();
+
     res.json({ ok: true, message: 'Cuenta marcada como pagada' });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
