@@ -307,6 +307,8 @@ router.post('/:id/checkout', (req, res) => {
       }
     });
   } catch (e) {
+    console.error('❌ Error en checkout de checkin', req.params.id, ':', e.message);
+    console.error(e.stack);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
