@@ -234,7 +234,14 @@ router.post('/:id/checkout', (req, res) => {
           });
           const isv_15 = base_isv * TASA_ISV;
           const iht_4  = base_iht * TASA_IHT;
-          const total  = base_exenta + base_isv + base_iht + isv_15 + iht_4;
+          // OJO: el total NO es base_exenta + base_isv + base_iht + impuestos.
+          // base_isv y base_iht son bases GRAVABLES (para el desglose fiscal) y
+          // se solapan a propósito: el hospedaje aplica ISV e IHT sobre el MISMO
+          // monto, no son dos cargos distintos. Sumarlas ambas al total duplica
+          // el cobro de la habitación. El monto real cobrado es la suma de cada
+          // línea UNA sola vez, más los impuestos calculados sobre esas bases.
+          const subtotalGeneral = items.reduce((s, it) => s + it.subtotal, 0);
+          const total = subtotalGeneral + isv_15 + iht_4;
 
           const correlativo = sarConfig.correlativo_actual;
           numeroFactura = `${sarConfig.establecimiento}-${sarConfig.punto_emision}-${sarConfig.tipo_documento}-${String(correlativo).padStart(8, '0')}`;

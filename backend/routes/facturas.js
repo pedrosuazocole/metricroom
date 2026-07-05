@@ -171,7 +171,12 @@ router.post('/', (req, res) => {
     const isv_15 = base_isv * TASA_ISV;
     const iht_4  = base_iht * TASA_IHT;
     const desc = descuento || 0;
-    const total = base_exenta + base_isv + base_iht + isv_15 + iht_4 - desc;
+    // OJO: base_isv y base_iht son bases GRAVABLES para el desglose fiscal y
+    // se solapan a propósito (hospedaje paga ISV e IHT sobre el mismo monto).
+    // El total real es cada línea contada UNA sola vez (subtotalGeneral) más
+    // los impuestos — sumar base_isv + base_iht duplicaría el cargo.
+    const subtotalGeneral = itemsCalculados.reduce((s, it) => s + it.sub, 0);
+    const total = subtotalGeneral + isv_15 + iht_4 - desc;
 
     // Transacción atómica
     const emitir = db.transaction(() => {
